@@ -1,4 +1,4 @@
-import { measureHand, PinchMachine, type GestureState as PinchState } from './pinch-machine';
+import { measureHand, pinchAnchor, PinchMachine, type GestureState as PinchState } from './pinch-machine';
 
 export interface Point { x: number; y: number }
 export interface Landmark extends Point { z?: number }
@@ -6,7 +6,7 @@ export interface ObservedHand { landmarks: Landmark[]; handedness: 'Left' | 'Rig
 export type HandChoice = 'Auto' | 'Left' | 'Right';
 export interface HandRange { left: number; right: number; top: number; bottom: number }
 export interface Calibration { hand: HandChoice; cursorGain: number; pinch: number; reach: number; centerX: number; centerY: number; range?: HandRange }
-export const defaultCalibration: Calibration = { hand: 'Auto', cursorGain: .85, pinch: 0.30, reach: 0.65, centerX: 0.5, centerY: 0.5 };
+export const defaultCalibration: Calibration = { hand: 'Auto', cursorGain: .85, pinch: 0.33, reach: 0.65, centerX: 0.5, centerY: 0.5 };
 export type GestureState = 'NO_HAND' | 'HAND_DETECTED' | 'POINTING' | 'HOVERING' | 'PINCH_START' | 'GRABBING' | 'DRAGGING' | 'DROP_PENDING' | 'RELEASED' | 'TRACKING_LOST';
 export interface GestureFrame {
   point: Point | null;
@@ -14,6 +14,7 @@ export interface GestureFrame {
   event?: 'grab' | 'drop' | 'cancel';
   hand?: ObservedHand;
   aspect?: number;
+  gap?: number | null;
 }
 export interface GameHandInput {
   canGrab: (point: Point) => boolean;
@@ -24,6 +25,8 @@ const clamp = (n: number) => Math.min(1, Math.max(0, n));
 function distance(a: Point, b: Point, aspect = 1) {
   return Math.hypot((a.x - b.x) * aspect, a.y - b.y);
 }
+
+export { pinchAnchor };
 
 export function pinchRatio(landmarks: Landmark[], aspect: number) {
   return measureHand({ landmarks, aspect, score: 1, hand: null })?.gap ?? NaN;
@@ -41,7 +44,7 @@ export function cursorPoint(raw: Point, calibration: Calibration): Point {
     top: centerY - reach / 2, bottom: centerY + reach / 2,
   };
   function axis(value: number, start: number, end: number) {
-    // A small margin lets the cursor reach the edge while the hand is still in view.
+    // A small margin lets the fingertips reach screen edges while the hand stays in view.
     const inset = range && bounds === range ? (end - start) * .035 : 0;
     const centered = 2 * clamp((value - start - inset) / Math.max(.001, end - start - 2 * inset)) - 1;
     const gain = Math.max(.65, Math.min(1.65, cursorGain));
@@ -60,7 +63,7 @@ export class GestureMachine {
   private lastSeen = -Infinity;
   private owner: ObservedHand | null = null;
   private pinch = new PinchMachine({
-    close: .30, open: .45, cutoff: 1.8, beta: 3.2, derivative: 1, mirror: false, hand: 'auto', grace: 400,
+    close: .33, open: .50, cutoff: 2.2, beta: 4.5, derivative: 1, mirror: false, hand: 'auto', grace: 380, holdGrace: 720,
   });
 
   frame(hands: ObservedHand[], timestamp: number, aspect: number, calibration: Calibration, hit: (point: Point) => boolean = () => false): GestureFrame | null {
@@ -69,10 +72,12 @@ export class GestureMachine {
     const valid = hands.filter(hand => hand.landmarks.length === 21 && hand.landmarks.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y)) &&
       hand.confidence >= .42 && (calibration.hand === 'Auto' || hand.handedness === calibration.hand));
     const owner = this.owner;
+    const holding = this.pinch.isHolding;
+    const lockWindow = holding ? 1100 : 850;
     let hand: ObservedHand | undefined;
-    if (owner && timestamp - this.lastSeen < 850) {
+    if (owner && timestamp - this.lastSeen < lockWindow) {
       const wrist = owner.landmarks[0];
-      const radius = Math.max(.13, distance(wrist, owner.landmarks[9], aspect) * 1.75);
+      const radius = Math.max(holding ? .18 : .13, distance(wrist, owner.landmarks[9], aspect) * (holding ? 2.5 : 1.75));
       hand = valid.filter(candidate => candidate.handedness === owner.handedness)
         .map(candidate => ({ candidate, gap: distance(wrist, candidate.landmarks[0], aspect) }))
         .sort((a, b) => a.gap - b.gap).find(item => item.gap < radius)?.candidate;
@@ -82,7 +87,7 @@ export class GestureMachine {
     }
     const pose = hand ? { landmarks: hand.landmarks, hand: hand.handedness, score: hand.confidence, aspect } : null;
     const map = (raw: Point) => cursorPoint(raw, calibration);
-    this.pinch.setThreshold(calibration.pinch, calibration.pinch + .15);
+    this.pinch.setThreshold(calibration.pinch, calibration.pinch + .17);
     const result = this.pinch.update(pose, timestamp, point => hit(map(point)));
     if (hand && result.gap !== null) {
       this.owner = hand;
@@ -97,6 +102,7 @@ export class GestureMachine {
       event: result.event === 'release' ? 'drop' : result.event,
       hand,
       aspect,
+      gap: result.gap,
     };
   }
 }

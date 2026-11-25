@@ -252,6 +252,10 @@ test.describe('responsive inventories on touch screens', () => {
         expect(operatorRail.x + operatorRail.width).toBeCloseTo(viewport.width, 0);
         expect(numberRail.x + numberRail.width).toBeCloseTo(scale.x, 0);
         expect(operatorRail.x).toBeCloseTo(scale.x + scale.width, 0);
+        const opFirst = (await page.locator('.operators .inventory-tile').first().boundingBox())!;
+        const opLast = (await page.locator('.operators .inventory-tile').last().boundingBox())!;
+        expect(opFirst.x).toBeCloseTo(opLast.x, 0);
+        expect(opLast.y).toBeGreaterThan(opFirst.y);
       }
       const inventory = page.locator('.inventory-tile');
       for (const item of await inventory.all()) {

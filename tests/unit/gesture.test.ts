@@ -75,16 +75,28 @@ describe('21-point hand input', () => {
     expect(later.find(frame => frame?.event === 'drop')?.point).toEqual(start?.point);
     expect(events(later)).toEqual(['drop']);
   });
-  it('cancels a confirmed release after occlusion, or cancels after sustained loss', () => {
+  it('keeps holding across fast-swipe gaps up to holdGrace, and cancels after sustained loss or occluded opening', () => {
     for (const recovery of [false, true]) {
       const machine = new GestureMachine();
       hold(machine);
       expect(machine.frame([], 690, 1, defaultCalibration)?.event).toBeUndefined();
-      const steps = recovery ? poseFrames(machine, false, 730, 6) :
-        [machine.frame([], 1060, 1, defaultCalibration)];
+      // A 500ms fast-swipe occlusion while holding must not drop the tile prematurely.
+      expect(machine.frame([], 1140, 1, defaultCalibration)?.event).toBeUndefined();
+      const steps = recovery ? poseFrames(machine, false, 1180, 6) :
+        [machine.frame([], 1420, 1, defaultCalibration)];
       expect(events(steps)).toEqual(['cancel']);
-      expect(machine.frame([], 1150, 1, defaultCalibration)?.event).toBeUndefined();
+      expect(machine.frame([], 1500, 1, defaultCalibration)?.event).toBeUndefined();
     }
+  });
+  it('grabs promptly when thumb and index close together and stays steady on pinch onset', () => {
+    const machine = new GestureMachine();
+    poseFrames(machine, false, 0, 4);
+    const hitTile = (point: { x: number; y: number }) => Math.abs(point.x - .5) < .3 && Math.abs(point.y - .5) < .3;
+    const first = machine.frame([hand(true, 'Right', 0)], 160, 1, defaultCalibration, hitTile);
+    const second = machine.frame([hand(true, 'Right', 0)], 200, 1, defaultCalibration, hitTile);
+    const grabbed = [first, second].find(frame => frame?.event === 'grab');
+    expect(grabbed).toBeDefined();
+    expect(grabbed?.state).toBe('GRABBING');
   });
   it('keeps holding through a brief detection gap and a brief opening', () => {
     const machine = new GestureMachine();

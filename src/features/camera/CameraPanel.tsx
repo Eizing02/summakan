@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Camera, Check, Crosshair, Hand, Mouse, X } from 'lucide-react';
 import { HandTracker, type CameraHelp } from '../../core/input/hand-tracker';
-import { GestureMachine, validHandRange, type Calibration, type GameHandInput, type HandRange, type Point } from '../../core/input/gesture-machine';
+import { GestureMachine, pinchAnchor, validHandRange, type Calibration, type GameHandInput, type HandRange, type Point } from '../../core/input/gesture-machine';
 import type { Preferences } from '../settings/settings';
 
 const connections = [[0,1,2,3,4], [0,5,6,7,8], [5,9,10,11,12], [9,13,14,15,16], [13,17,18,19,20], [0,17]];
@@ -100,7 +100,8 @@ export function CameraPanel({ open, required, control, preferences, onCalibratio
       return;
     }
     const landmarks = frame.hand?.landmarks;
-    const tip = landmarks && { x: 1 - landmarks[8].x, y: landmarks[8].y };
+    const anchor = landmarks && pinchAnchor(landmarks);
+    const tip = anchor && { x: 1 - anchor.x, y: anchor.y };
     if (settings.current.capture && tip) {
       samples.current.push({ point: tip, at: performance.now() });
       if (samples.current.length > 5) samples.current.shift();
@@ -108,13 +109,26 @@ export function CameraPanel({ open, required, control, preferences, onCalibratio
     overlay.current?.querySelectorAll<SVGPolylineElement>('polyline').forEach((line, index) => {
       line.setAttribute('points', landmarks ? connections[index].map(i => `${(1 - landmarks[i].x) * 100},${landmarks[i].y * 100}`).join(' ') : '');
     });
+    const thumbDot = overlay.current?.querySelector('[data-tip="thumb"]');
+    const indexDot = overlay.current?.querySelector('[data-tip="index"]');
+    if (landmarks && thumbDot && indexDot) {
+      thumbDot.setAttribute('cx', String((1 - landmarks[4].x) * 100));
+      thumbDot.setAttribute('cy', String(landmarks[4].y * 100));
+      thumbDot.setAttribute('visibility', 'visible');
+      indexDot.setAttribute('cx', String((1 - landmarks[8].x) * 100));
+      indexDot.setAttribute('cy', String(landmarks[8].y * 100));
+      indexDot.setAttribute('visibility', 'visible');
+    } else {
+      thumbDot?.setAttribute('visibility', 'hidden');
+      indexDot?.setAttribute('visibility', 'hidden');
+    }
     const marker = overlay.current?.querySelector('[data-tracking-cursor]');
     const markerPoint = settings.current.practice ? frame.point : tip;
     if (marker && markerPoint) {
       marker.setAttribute('cx', String(markerPoint.x * 100));
       marker.setAttribute('cy', String(markerPoint.y * 100));
       marker.setAttribute('visibility', 'visible');
-      marker.setAttribute('fill', frame.state === 'DRAGGING' || frame.state === 'GRABBING' ? '#fde09a' : '#82e4ff');
+      marker.setAttribute('fill', frame.state === 'DRAGGING' || frame.state === 'GRABBING' ? '#ffd36c' : '#82e4ff');
     } else marker?.setAttribute('visibility', 'hidden');
     if (statusLine.current && timestamp - lastUpdate.current >= 180) {
       lastUpdate.current = timestamp;
@@ -192,7 +206,7 @@ export function CameraPanel({ open, required, control, preferences, onCalibratio
     <header className="dialog-header"><h2><Camera size={24}/> ตั้งค่ากล้อง</h2><button type="button" className="icon-button" aria-label="ปิด" onClick={close}><X size={21}/></button></header>
     <div className="dialog-body">
       <p>{required ? 'ก่อนเล่นครั้งแรก ให้เปิดกล้องแล้วกดใช้กล้องเพื่อเข้าเกม ภาพจะประมวลผลบนอุปกรณ์นี้' :
-        'อนุญาตให้ใช้กล้องเพื่อใช้นิ้วชี้เลื่อนเคอร์เซอร์และหนีบนิ้วเพื่อหยิบวัตถุ ภาพจะประมวลผลบนอุปกรณ์นี้'}</p>
+        'อนุญาตให้ใช้กล้องเพื่อขยับมือแล้วแตะนิ้วโป้งกับนิ้วชี้เพื่อหยิบวัตถุ ภาพจะประมวลผลบนอุปกรณ์นี้'}</p>
       <div className="camera-grid">
         <div className="camera-column">
           <div className="camera-preview">
@@ -202,7 +216,9 @@ export function CameraPanel({ open, required, control, preferences, onCalibratio
               {connections.map((_, i) => <polyline key={i} fill="none" stroke="#8af6cc" strokeWidth=".6"/>)}
               {running && step && <rect x={step.x} y={step.y} width={step.width} height={step.height} rx="2" stroke="#e8bc68" strokeWidth="1" fill="#e8bc6833" data-calibration-target="true"/>}
               {running && practice && <circle cx="50" cy="50" r="11" stroke={practice === 'done' ? '#8af6cc' : '#e8bc68'} strokeWidth="1" fill="none" data-calibration-target="true"/>}
-              <circle data-tracking-cursor="true" cx="50" cy="50" r="2" stroke="#0f1b2d" strokeWidth=".6" fill="#82e4ff" visibility="hidden"/>
+              <circle data-tip="thumb" cx="50" cy="50" r="2.2" stroke="#181b39" strokeWidth=".6" fill="#ffe46d" visibility="hidden"/>
+              <circle data-tip="index" cx="50" cy="50" r="2.2" stroke="#181b39" strokeWidth=".6" fill="#ffe46d" visibility="hidden"/>
+              <circle data-tracking-cursor="true" cx="50" cy="50" r="1.8" stroke="#0f1b2d" strokeWidth=".55" fill="#82e4ff" visibility="hidden"/>
             </svg>
           </div>
           {running && <p><span>{status}</span><br/><span ref={statusLine}>ยกมือให้อยู่ในกรอบกล้อง</span></p>}

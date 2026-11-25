@@ -21,11 +21,11 @@ async function withSyntheticCamera(page: Page, delegate: 'GPU' | 'CPU' = 'CPU', 
           document.documentElement.dataset.testPoseStep = String(pose.step);
           const { x, y, pinched } = pose;
           const offsets = [
-            [0, .15], [.037, .12], [.05, .093], [pinched ? .02 : .064, .055], [pinched ? .005 : .065, 0],
-            [.027, .059], [.02, .035], [.008, .015], [0, 0],
-            [0, .055], [-.005, .015], [-.01, -.01], [-.014, -.029],
-            [-.03, .06], [-.037, .025], [-.04, .005], [-.046, -.009],
-            [-.057, .074], [-.065, .048], [-.071, .031], [-.075, .019],
+            [0, .16], [.038, .12], [.048, .088], [pinched ? .018 : .046, .044], [pinched ? .003 : .034, pinched ? .002 : .018],
+            [.022, .062], [.014, .036], [.002, .014], [pinched ? -.003 : -.034, pinched ? -.002 : -.018],
+            [-.004, .058], [-.01, .016], [-.015, -.01], [-.019, -.029],
+            [-.034, .064], [-.041, .028], [-.045, .006], [-.05, -.009],
+            [-.061, .078], [-.069, .05], [-.075, .033], [-.079, .02],
           ];
           const landmarks = offsets.map(([dx, dy]) => ({ x: 1 - x + dx, y: y + dy }));
           event.data.result.landmarks = [landmarks];
@@ -291,46 +291,52 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   const field = (await page.locator('.playfield').boundingBox())!;
   const lab = (await page.locator('.lab').boundingBox())!;
   const first = (await page.locator('.digits .inventory-tile').first().boundingBox())!;
-  const rowOneEnd = (await page.locator('.digits .inventory-tile').nth(4).boundingBox())!;
-  const rowTwoStart = (await page.locator('.digits .inventory-tile').nth(5).boundingBox())!;
+  const rowOneEnd = (await page.locator('.digits .inventory-tile').nth(1).boundingBox())!;
+  const rowTwoStart = (await page.locator('.digits .inventory-tile').nth(2).boundingBox())!;
   const last = (await page.locator('.digits .inventory-tile').last().boundingBox())!;
   const firstOp = (await page.locator('.operators .inventory-tile').first().boundingBox())!;
   const lastOp = (await page.locator('.operators .inventory-tile').last().boundingBox())!;
   expect(first.y).toBe(rowOneEnd.y);
   expect(first.x).toBe(rowTwoStart.x);
   expect(rowTwoStart.y).toBeGreaterThan(first.y);
+  expect(firstOp.x).toBe(lastOp.x);
+  expect(lastOp.y).toBeGreaterThan(firstOp.y);
   expect(firstOp.x).toBeGreaterThan(rowOneEnd.x + rowOneEnd.width);
   expect(first.x).toBeLessThan(20);
   expect(last.x + last.width).toBeLessThanOrEqual(lab.x);
   expect(firstOp.x).toBeGreaterThanOrEqual(lab.x + lab.width);
   expect(lastOp.x + lastOp.width).toBeGreaterThan(field.width - 20);
   expect(first.y).toBeLessThan(lab.y + lab.height / 2);
-  expect(last.y).toBeGreaterThan(lab.y + lab.height / 2);
+  expect(last.y + last.height).toBeGreaterThan(lab.y + lab.height - 20);
+  expect(lastOp.y + lastOp.height).toBeGreaterThan(lab.y + lab.height - 20);
   const left = field.x + 12, right = field.x + field.width - 12;
   const top = field.y + 8, bottom = field.y + field.height - 8;
   const setPose = async (x: number, y: number, pinched: boolean) => {
     await move(.175 + .65 * (x - left) / (right - left), .175 + .65 * (y - top) / (bottom - top), pinched);
   };
   const cursor = page.locator('.hand-cursor');
-  const ring = cursor.locator('.hand-cursor-aim');
+  const bones = cursor.locator('.hand-cursor-bones');
   const joints = cursor.locator('.hand-cursor-landmarks');
   const tips = cursor.locator('.hand-cursor-tips');
+  const contact = cursor.locator('.hand-cursor-contact');
   const openHand = cursor.locator('.hand-cursor-shape');
-  await setPose(tile.x - 2, tile.y + tile.height / 2, false);
+  await expect(cursor.locator('.hand-cursor-aim')).toHaveCount(0);
+  await setPose(tile.x + tile.width / 2, tile.y + tile.height / 2, false);
   await expect(digit).toHaveClass(/hand-hover/);
   await expect(cursor).toHaveAttribute('data-mode', 'target');
-  await expect(ring).toHaveCSS('border-top-color', 'rgb(211, 242, 255)');
-  await expect(ring).toHaveCSS('width', '26px');
-  await expect(openHand).toHaveCSS('opacity', '0.68');
+  await expect(openHand).toHaveCSS('width', '230px');
+  await expect(contact).toHaveCSS('opacity', '0');
+  await expect(bones).toHaveAttribute('d', /^(?:M[^M]+){6}$/);
   await expect(joints).toHaveAttribute('d', /^(?:M[^M]+){19}$/);
   await expect(tips).toHaveAttribute('d', /^(?:M[^M]+){2}$/);
   const openPose = await tips.getAttribute('d');
-  await setPose(tile.x - 2, tile.y + tile.height / 2, true);
+  await setPose(tile.x + tile.width / 2, tile.y + tile.height / 2, true);
   const region = page.locator('[data-drop-region="left"]');
   await expect(region).toBeVisible();
   await expect(cursor).toHaveAttribute('data-mode', 'holding');
-  await expect(ring).toHaveCSS('border-top-color', 'rgb(255, 211, 108)');
-  await expect(openHand).toHaveCSS('opacity', '0.54');
+  await expect(tips).toHaveCSS('fill', 'rgb(255, 211, 108)');
+  await expect(contact).toHaveCSS('opacity', '1');
+  await expect(joints).toHaveCSS('opacity', '0.55');
   await expect(tips).not.toHaveAttribute('d', openPose!);
   const draws = await page.evaluate(() => new Promise<{ inference?: string; cursorX: number; tileX: number }[]>(resolve => {
     const testWindow = window as CameraTestWindow;
@@ -363,14 +369,14 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   const bounds = (await region.boundingBox())!;
   const x = bounds.x + 20, y = bounds.y + bounds.height * .66;
   for (let progress = .1; progress <= 1.01; progress += .1) {
-    await setPose(tile.x + (x - tile.x) * progress, tile.y + tile.height / 2 + (y - tile.y - tile.height / 2) * progress, true);
+    await setPose(tile.x + tile.width / 2 + (x - tile.x - tile.width / 2) * progress, tile.y + tile.height / 2 + (y - tile.y - tile.height / 2) * progress, true);
   }
   await expect(region).toHaveAttribute('data-over', 'true');
   await setPose(x, y, false);
   await expect(page.getByTestId('expression-left')).toHaveAttribute('aria-label', 'x + 3 + 3');
   await expect(region).toHaveCount(0);
   await expect(cursor).toHaveAttribute('data-mode', 'aim');
-  await expect(ring).toHaveCSS('border-top-color', 'rgb(255, 252, 238)');
+  await expect(contact).toHaveCSS('opacity', '0');
   await setPose(x, y, true);
   await expect(cursor).toHaveAttribute('data-pose', 'POINTING');
   await expect(cursor).toHaveAttribute('data-mode', 'aim');

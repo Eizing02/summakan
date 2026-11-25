@@ -1,4 +1,4 @@
-// Adapted from Eizing02/Thai-kum-prasom at a633d80.
+// Adapted from Eizing02/Thai-kum-prasom at a633d80, tuned for direct thumb-index pinch interaction.
 import type { Point } from './gesture-machine';
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
@@ -38,10 +38,16 @@ interface GestureSettings {
   mirror: boolean;
   hand: 'auto' | 'Left' | 'Right';
   grace: number;
+  holdGrace?: number;
 }
 
 export function handCoordinates(point: Point, mirror: boolean) {
   return { x: clamp(mirror ? 1 - point.x : point.x, .015, .985), y: clamp(point.y, .015, .985) }
+}
+
+export function pinchAnchor(landmarks: readonly Point[]): Point {
+  const thumb = landmarks[4], index = landmarks[8];
+  return { x: (thumb.x + index.x) / 2, y: (thumb.y + index.y) / 2 };
 }
 
 export function measureHand(pose: HandPose) {
@@ -53,7 +59,7 @@ export function measureHand(pose: HandPose) {
   const index = points[8], thumb = points[4]
   const gap = distance(thumb, index) / scale
   if (!Number.isFinite(gap)) return null
-  return { gap, index }
+  return { gap, anchor: pinchAnchor(points) }
 }
 
 export class PinchMachine {
@@ -65,6 +71,7 @@ export class PinchMachine {
   private cooldownUntil = 0
   private count = 0
   private armed = false
+  private pendingGrab: Point | null = null
   private pendingRelease: { point: Point; uncertain: boolean } | null = null
   private missing = false
   private x: OneEuro
@@ -74,19 +81,22 @@ export class PinchMachine {
   constructor(private config: GestureSettings) {
     this.x = new OneEuro(config.cutoff, config.beta, config.derivative)
     this.y = new OneEuro(config.cutoff, config.beta, config.derivative)
-    this.gap = new OneEuro(3, .8, config.derivative)
+    this.gap = new OneEuro(5.5, 1.8, config.derivative)
   }
   setThreshold(close: number, open: number) {
     this.config.close = close;
     this.config.open = open;
   }
 
+  get isHolding() { return this.holding }
   private get holding() { return ['GRABBING', 'DRAGGING', 'RELEASE_PENDING'].includes(this.state) }
+  private get activeGrace() { return this.holding ? (this.config.holdGrace ?? this.config.grace) : this.config.grace }
   private clearPose() {
     this.point = null
     this.x.reset()
     this.y.reset()
     this.gap.reset()
+    this.pendingGrab = null
     this.pendingRelease = null
   }
   private startRelease(point: Point, time: number, uncertain: boolean) {
@@ -106,10 +116,14 @@ export class PinchMachine {
     if (time <= this.last) return { point: this.point, state: this.state, gap: null }
     this.last = time
     const raw = pose && pose.score >= .42 && (this.config.hand === 'auto' || this.config.hand === pose.hand) ? measureHand(pose) : null
+    const grace = this.activeGrace
     if (!raw) {
-      if (time - this.seen < this.config.grace) {
+      if (time - this.seen < grace) {
         this.missing = true
-        if (this.state === 'PINCH_CANDIDATE') this.state = 'IDLE'
+        if (this.state === 'PINCH_CANDIDATE') {
+          this.state = 'IDLE'
+          this.pendingGrab = null
+        }
         if (this.state === 'RELEASE_PENDING') {
           this.state = 'DRAGGING'
           this.pendingRelease = null
@@ -121,14 +135,14 @@ export class PinchMachine {
       return { point: null, state: this.state, gap: null, event }
     }
     const recovered = this.missing
-    if (recovered && this.holding && time - this.seen >= this.config.grace) {
+    if (recovered && this.holding && time - this.seen >= grace) {
       this.cancel()
       return { point: null, state: this.state, gap: null, event: 'cancel' }
     }
     this.missing = false
     this.seen = time
     const gap = this.gap.update(raw.gap, time)
-    const aim = handCoordinates(raw.index, this.config.mirror)
+    const aim = handCoordinates(raw.anchor, this.config.mirror)
     const point = { x: this.x.update(aim.x, time), y: this.y.update(aim.y, time) }
     this.point = point
     if (recovered && this.holding && raw.gap > this.config.open) {
@@ -153,7 +167,7 @@ export class PinchMachine {
         }
         // Keep the position at the onset of the opening while subsequent frames confirm it.
         this.point = release.point
-        if (++this.count < 2 || time - this.pendingSince < 85) break
+        if (++this.count < 2 || time - this.pendingSince < 65) break
         if (release.uncertain) {
           this.cancel()
           return { point: null, state: this.state, gap, event: 'cancel' }
@@ -161,30 +175,45 @@ export class PinchMachine {
         if (gap <= this.config.open) break
         this.state = 'COOLDOWN'
         this.pendingRelease = null
-        this.cooldownUntil = time + 190
+        this.cooldownUntil = time + 120
         this.armed = false
         event = 'release'
         break
       }
-      case 'PINCH_CANDIDATE':
-        if (!hovering || gap >= this.config.close) {
-          if (!hovering) this.armed = false;
-          this.state = hovering ? 'HOVER' : 'IDLE';
+      case 'PINCH_CANDIDATE': {
+        const origin = this.pendingGrab ?? point
+        const stillOnTarget = hovering || hit(origin)
+        if (!stillOnTarget || (raw.gap >= this.config.close && gap >= this.config.close)) {
+          if (!stillOnTarget && raw.gap < this.config.close) this.armed = false
+          this.pendingGrab = null
+          this.state = hovering ? 'HOVER' : 'IDLE'
+          break
         }
-        else if (++this.count >= 2 && time - this.pendingSince >= 65) {
+        // Hold the pinch onset point steady while thumb and index finish closing.
+        this.point = origin
+        if (++this.count >= 2 && (time - this.pendingSince >= 35 || raw.gap < this.config.close * .72)) {
           this.state = 'GRABBING'
+          this.pendingGrab = null
           event = 'grab'
         }
         break
+      }
       default:
-        if (gap >= this.config.open) this.armed = true
-        if (this.armed && hovering && gap < this.config.close) {
-          this.state = 'PINCH_CANDIDATE'
-          this.pendingSince = time
-          this.count = 1
+        if (gap >= this.config.open || raw.gap >= this.config.open) this.armed = true
+        if (this.armed && hovering && (raw.gap < this.config.close || gap < this.config.close)) {
+          if (raw.gap < this.config.close * .62 && gap < this.config.close) {
+            this.state = 'GRABBING'
+            this.pendingGrab = null
+            event = 'grab'
+          } else {
+            this.state = 'PINCH_CANDIDATE'
+            this.pendingGrab = point
+            this.pendingSince = time
+            this.count = 1
+          }
         } else {
-          if (!hovering && gap < this.config.close) this.armed = false;
-          this.state = hovering ? 'HOVER' : 'IDLE';
+          if (!hovering && raw.gap < this.config.close) this.armed = false
+          this.state = hovering ? 'HOVER' : 'IDLE'
         }
     }
     return { point: this.point, state: this.state, event, gap }

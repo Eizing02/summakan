@@ -28,7 +28,7 @@ function handTile(element: Element | null, point: Point) {
   if (direct) return direct;
   const inventory = element?.closest('[data-return-inventory]');
   let nearest: HTMLElement | null = null;
-  let distance = 12;
+  let distance = 16;
   for (const tile of inventory?.querySelectorAll<HTMLElement>('.inventory-tile:not(:disabled)') ?? []) {
     const candidate = distanceToTile(point, tile);
     if (candidate < distance) { nearest = tile; distance = candidate; }
@@ -274,7 +274,7 @@ export function useDrag(
   function aimedTile(position: Point, hit: Element | null) {
     if (held.current) return null;
     const previous = hover.current;
-    if (previous?.isConnected && previous.matches('[data-tile]:not(:disabled)') && distanceToTile(position, previous) <= 5) return previous;
+    if (previous?.isConnected && previous.matches('[data-tile]:not(:disabled)') && distanceToTile(position, previous) <= 8) return previous;
     return handTile(hit, position);
   }
 
@@ -302,8 +302,8 @@ export function useDrag(
     else if (frame.state !== 'PINCH_START' && frame.event !== 'grab') pinchTile.current = undefined;
     if (!position || frame.state === 'TRACKING_LOST') { cursor.current?.fade(frame.event === 'cancel'); return; }
     if (frame.event === 'grab') {
-      const aimed = pinchTile.current;
-      const source = aimed && aimed.isConnected && aimed.matches('[data-tile]:not(:disabled)') && distanceToTile(position, aimed) <= 15
+      const aimed = pinchTile.current ?? tile;
+      const source = aimed && aimed.isConnected && aimed.matches('[data-tile]:not(:disabled)') && distanceToTile(position, aimed) <= 26
         ? tileSource(aimed) : undefined;
       pinchTile.current = undefined;
       if (source) start(source, position, null, true);

@@ -9,9 +9,9 @@ type CameraStatus = (message: string, running: boolean, help?: CameraHelp) => vo
 const runtime = () => new URL(import.meta.env.BASE_URL + 'mediapipe/', document.baseURI);
 // Capture limits and video-frame scheduling follow Thai-kum-prasom (a633d80).
 const captureProfiles = {
-  low: { hz: 16, width: 384 },
-  medium: { hz: 24, width: 480 },
-  high: { hz: 30, width: 640 },
+  low: { hz: 20, width: 384 },
+  medium: { hz: 26, width: 384 },
+  high: { hz: 30, width: 512 },
 };
 
 function frameHeight(video: HTMLVideoElement, width: number) {

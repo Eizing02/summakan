@@ -202,7 +202,7 @@ export function GameScreen(props: GameProps) {
 
   const tutorial = state.drafts.left || state.drafts.right ? 'หยิบตัวเลขไปวางต่อท้ายเครื่องหมายบนจาน'
     : state.pending.left.length || state.pending.right.length ? 'สังเกตตาชั่ง แล้วเติมคำสั่งให้อีกฝั่งมีผลสะสมเท่ากัน'
-    : 'เลื่อนเคอร์เซอร์ไปที่เครื่องหมาย แล้วหนีบนิ้วหรือคลิกเพื่อหยิบ';
+    : 'ขยับมือไปที่เครื่องหมาย แล้วแตะนิ้วโป้งกับนิ้วชี้หรือคลิกเพื่อหยิบ';
   const snap = (side: Side, element: HTMLButtonElement) => {
     if (drag.selection) drag.finish({ side, inventory: false });
     else if (enabled) element.focus();
@@ -383,7 +383,7 @@ export function GameScreen(props: GameProps) {
         <label>คำคาดการณ์<textarea value={prediction} onChange={event => setPrediction(event.target.value)} maxLength={500}/></label></>}
       {panel === 'explain' && <><p>เหตุใดการดำเนินการที่เขียนต่างกันจึงอาจให้ผลสะสมเท่ากันทั้งสองฝั่ง</p>
         <label>คำอธิบาย<textarea value={explanation} onChange={event => setExplanation(event.target.value)} maxLength={500}/></label></>}
-      {panel === 'controls' && <ol className="instructions"><li>ชี้และหนีบนิ้ว หรือลากด้วยเมาส์เพื่อหยิบเครื่องหมาย</li><li>ปล่อยเครื่องหมายบนจาน แล้วหยิบตัวเลขไปวางต่อ</li>
+      {panel === 'controls' && <ol className="instructions"><li>ขยับมือไปที่เครื่องหมายแล้วแตะนิ้วโป้งกับนิ้วชี้ หรือลากด้วยเมาส์เพื่อหยิบ</li><li>ปล่อยนิ้วเพื่อวางเครื่องหมายบนจาน แล้วหยิบตัวเลขไปวางต่อ</li>
         <li>สังเกตความเอียง แล้วทำให้ผลสะสมทั้งสองฝั่งสมมูลกัน</li><li>กด Tab และ Enter เพื่อเลือกวัตถุและจานด้วยคีย์บอร์ด</li></ol>}
     </Dialog>}
   </main>;
