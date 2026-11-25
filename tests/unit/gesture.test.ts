@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cameraError } from '../../src/core/input/hand-tracker';
-import { cursorPoint, defaultCalibration, GestureMachine, pinchRatio, type ObservedHand } from '../../src/core/input/gesture-machine';
+import { cursorPoint, defaultCalibration, GestureMachine, pinchRatio, validHandRange, type ObservedHand } from '../../src/core/input/gesture-machine';
 
 function hand(pinched: boolean, handedness: ObservedHand['handedness'] = 'Right', offset = 0, confidence = .92): ObservedHand {
   const landmarks = Array.from({ length: 21 }, () => ({ x: .50 + offset, y: .52 }));
@@ -15,12 +15,36 @@ function hand(pinched: boolean, handedness: ObservedHand['handedness'] = 'Right'
 
 describe('21-point hand input', () => {
   it('mirrors horizontal motion and scales coordinates during calibration', () => {
-    const settings = { ...defaultCalibration, reach: 1 };
+    const settings = { ...defaultCalibration, reach: 1, cursorGain: 1 };
     expect(cursorPoint({ x: .6, y: .4 }, settings).x).toBeCloseTo(.4);
     expect(cursorPoint({ x: .4, y: .6 }, settings)).toEqual({ x: .6, y: .6 });
     expect(cursorPoint({ x: .4, y: .6 }, { ...settings, centerX: .6, centerY: .6 })).toEqual({ x: .5, y: .5 });
     const sample = hand(true).landmarks;
     expect(pinchRatio(sample, 4 / 3)).toBeCloseTo(pinchRatio(sample.map(({ x, y }) => ({ x: x / 2, y: y / 2 })), 4 / 3));
+  });
+  it('maps the four comfortable reaches to all screen edges even at reduced sensitivity', () => {
+    const range = { left: .24, right: .61, top: .35, bottom: .58 };
+    const config = { ...defaultCalibration, cursorGain: .65, range };
+    expect(validHandRange(range)).toBe(true);
+    expect(validHandRange({ ...range, bottom: .4 })).toBe(false);
+    expect(cursorPoint({ x: .76, y: .35 }, config)).toEqual({ x: 0, y: 0 });
+    expect(cursorPoint({ x: .39, y: .58 }, config)).toEqual({ x: 1, y: 1 });
+    expect(cursorPoint({ x: .575, y: .465 }, config).y).toBeCloseTo(.5);
+  });
+  it('holds steady over tiny jitter and follows deliberate movement including while pinching', () => {
+    const machine = new GestureMachine();
+    const start = machine.frame([hand(false)], 0, 1, defaultCalibration)?.point?.x;
+    for (let i = 1; i <= 10; i++) {
+      expect(machine.frame([hand(false, 'Right', i % 2 ? -.002 : .002)], i * 40, 1, defaultCalibration)?.point?.x).toBe(start);
+    }
+    machine.frame([hand(true)], 440, 1, defaultCalibration);
+    expect(machine.frame([hand(true)], 480, 1, defaultCalibration)?.event).toBe('grab');
+    let frame;
+    for (let i = 1; i <= 8; i++) {
+      frame = machine.frame([hand(true, 'Right', Math.min(i, 3) * .06)], 480 + i * 40, 1, defaultCalibration);
+    }
+    expect(frame?.state).toBe('DRAGGING');
+    expect(frame?.point?.x).toBeCloseTo(cursorPoint({ x: .63, y: .42 }, defaultCalibration).x, 1);
   });
   it('arms only after release, debounces a grab and release, and rejects duplicate or stale frames', () => {
     const machine = new GestureMachine();

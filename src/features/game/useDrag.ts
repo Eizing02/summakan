@@ -3,6 +3,7 @@ import type { Point, GestureFrame } from '../../core/input/gesture-machine';
 import type { Side } from '../../core/mathematics/linear-expression';
 import { sound } from '../audio/audio';
 import { acceptsTile, canEdit, type GameAction, type Session, type Tile } from './session';
+import type { HandCursorDisplay } from './HandCursor';
 
 export type ObjectSource = { tile: Tile; side?: Side; index?: number | 'draft' };
 type Held = { source: ObjectSource; origin: Point; point: Point; pointer: number | null; moved: boolean; hand: boolean; over?: Side; releaseSide?: Side };
@@ -24,14 +25,29 @@ function distanceToTile(point: Point, tile: HTMLElement) {
 function handTile(element: Element | null, point: Point) {
   const direct = element?.closest<HTMLElement>('[data-tile]:not(:disabled)');
   if (direct) return direct;
-  const digits = element?.closest('.tile-group.digits');
+  const inventory = element?.closest('[data-return-inventory]');
   let nearest: HTMLElement | null = null;
   let distance = 12;
-  for (const tile of digits?.querySelectorAll<HTMLElement>('[data-tile]:not(:disabled)') ?? []) {
+  for (const tile of inventory?.querySelectorAll<HTMLElement>('.inventory-tile:not(:disabled)') ?? []) {
     const candidate = distanceToTile(point, tile);
     if (candidate < distance) { nearest = tile; distance = candidate; }
   }
   return nearest;
+}
+
+function handPosition(surface: HTMLElement, point: Point): Point | null {
+  const board = surface.getBoundingClientRect();
+  const lab = surface.querySelector('.lab')?.getBoundingClientRect();
+  const digits = surface.querySelector('.digits')?.getBoundingClientRect();
+  const lastTile = surface.querySelector('.digits')?.lastElementChild?.getBoundingClientRect();
+  if (!lab || !digits || !lastTile) return null;
+  const inset = Math.min(16, lastTile.width * .25);
+  const left = Math.max(0, board.left, digits.left + inset);
+  const right = Math.min(window.innerWidth - 1, board.right - 1, digits.right - inset);
+  const top = Math.max(0, board.top, lab.top + 8);
+  const bottom = Math.min(window.innerHeight - 1, board.bottom - 1, lastTile.bottom - lastTile.height * .24);
+  if (right < left || bottom < top) return null;
+  return { x: left + point.x * (right - left), y: top + point.y * (bottom - top) };
 }
 
 function dropTarget(element: Element | null): DropTarget {
@@ -51,9 +67,9 @@ export function useDrag(
 ) {
   const held = useRef<Held | null>(null);
   const ghost = useRef<HTMLDivElement>(null);
-  const cursor = useRef<HTMLDivElement>(null);
+  const cursor = useRef<HandCursorDisplay>(null);
   const hover = useRef<HTMLElement | null>(null);
-  const pinchTile = useRef<HTMLElement | null>(null);
+  const pinchTile = useRef<HTMLElement | null | undefined>(undefined);
   const returnTimer = useRef<number | undefined>(undefined);
   const pulseTimer = useRef<number | undefined>(undefined);
   const [drawing, setDrawing] = useState<Ghost | null>(null);
@@ -66,11 +82,6 @@ export function useDrag(
   function moveGhost(point: Point) {
     ghost.current?.style.setProperty('--ghost-x', point.x + 'px');
     ghost.current?.style.setProperty('--ghost-y', point.y + 'px');
-  }
-  function showAt(node: HTMLDivElement | null, point: Point) {
-    if (!node) return;
-    node.style.setProperty('--cursor-x', point.x + 'px');
-    node.style.setProperty('--cursor-y', point.y + 'px');
   }
   useEffect(() => {
     if (!drawing) return;
@@ -141,8 +152,8 @@ export function useDrag(
       if (held.current) finish({ inventory: false });
       hover.current?.classList.remove('hand-hover');
       hover.current = null;
-      pinchTile.current = null;
-      if (cursor.current) cursor.current.hidden = true;
+      pinchTile.current = undefined;
+      cursor.current?.hide();
     }
   }, [enabled]);
 
@@ -206,19 +217,16 @@ export function useDrag(
   }
 
   function handFrame(frame: GestureFrame) {
-    const zone = surface.current?.getBoundingClientRect();
-    if (!zone || !enabled) return false;
-    const left = Math.max(0, zone.left), top = Math.max(0, zone.top);
-    const right = Math.min(window.innerWidth, zone.right) - 1, bottom = Math.min(window.innerHeight, zone.bottom) - 1;
-    const position = frame.point && right >= left && bottom >= top ? {
-      x: left + frame.point.x * (right - left), y: top + frame.point.y * (bottom - top),
-    } : null;
-    if (cursor.current) cursor.current.hidden = !position;
+    if (!surface.current || !enabled) return false;
+    const position = frame.point && handPosition(surface.current, frame.point);
     if (frame.event === 'cancel' && held.current?.hand) {
       finish({ inventory: false }, frame.state === 'TRACKING_LOST');
     }
     const hit = position ? document.elementFromPoint(position.x, position.y) : null;
-    const tile = position && !held.current ? handTile(hit, position) : null;
+    const previousTile = hover.current?.matches('[data-tile]:not(:disabled)') && hover.current.isConnected ? hover.current : null;
+    const tile = position && !held.current
+      ? previousTile && distanceToTile(position, previousTile) <= 5 ? previousTile : handTile(hit, position)
+      : null;
     const element = tile ?? hit?.closest<HTMLElement>('[data-drop-side]') ?? null;
     if (hover.current !== element) {
       hover.current?.classList.remove('hand-hover');
@@ -226,14 +234,14 @@ export function useDrag(
       hover.current = element;
       if (element?.hasAttribute('data-tile')) sound('ui_hover');
     }
-    if (frame.state === 'PINCH_START') pinchTile.current ??= tile;
-    else if (frame.event !== 'grab') pinchTile.current = null;
-    if (!position) return false;
-    showAt(cursor.current, position);
+    if (frame.state === 'PINCH_START' && pinchTile.current === undefined) pinchTile.current = tile;
+    else if (frame.state !== 'PINCH_START' && frame.event !== 'grab') pinchTile.current = undefined;
+    if (!position || frame.state === 'TRACKING_LOST') { cursor.current?.fade(); return false; }
     if (frame.event === 'grab') {
       const aimed = pinchTile.current;
-      const source = tileSource(aimed?.isConnected && distanceToTile(position, aimed) <= 14 ? aimed : tile);
-      pinchTile.current = null;
+      const source = aimed && aimed.isConnected && aimed.matches('[data-tile]:not(:disabled)') && distanceToTile(position, aimed) <= 15
+        ? tileSource(aimed) : undefined;
+      pinchTile.current = undefined;
       if (source) start(source, position, null, true);
     }
     const item = held.current;
@@ -247,6 +255,7 @@ export function useDrag(
       update(position, target);
       if (frame.event === 'drop') finish(target);
     }
+    cursor.current?.show(frame, position, Boolean(held.current?.hand), Boolean(element));
     return Boolean(element);
   }
 

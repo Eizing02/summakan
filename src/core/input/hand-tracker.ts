@@ -31,7 +31,11 @@ async function mainThreadDetector(preferred: Delegate) {
 
 function workerDetector(worker: Worker, preference: Delegate) {
   return new Promise<Delegate>((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error('เริ่ม Worker เกินเวลาที่กำหนด')), 12000);
+    // A cold start needs to fetch the model and compile WASM before the Worker can respond.
+    const timeout = window.setTimeout(() => {
+      finish();
+      reject(new Error('เริ่ม Worker เกินเวลาที่กำหนด'));
+    }, 25000);
     const finish = () => {
       clearTimeout(timeout);
       worker.onmessage = null;

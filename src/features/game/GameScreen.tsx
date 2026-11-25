@@ -18,6 +18,7 @@ import type { LessonOptions, Preferences } from '../settings/settings';
 import { challenges, modeNames, type Challenge, type Mode } from './modes';
 import { activeMilliseconds, canEdit, digits, gameReducer, newSession, type HistoryEntry, type Session, type Tile } from './session';
 import { canPlaceTile, useDrag, type ObjectSource } from './useDrag';
+import { HandCursor } from './HandCursor';
 import { expressionParts } from './expression-parts';
 
 interface Props {
@@ -321,7 +322,7 @@ export function GameScreen(props: Props) {
       <div className="tile-group digits" aria-label="ตัวเลข">{digits.map(buttonFor)}</div>
     </div>
 
-    <div className="hand-cursor" ref={drag.cursor} hidden aria-hidden="true"/>
+    <HandCursor display={drag.cursor} reduced={preferences.reduced}/>
     {drag.drawing && <div className={'drag-ghost' + (drag.drawing.returning ? ' is-returning' : '')} ref={drag.ghost} aria-hidden="true"><TileFace tile={drag.drawing.tile}/></div>}
 
     {state.phase === 'SOLVED' && verificationOpen && <Dialog title="แทนค่าตรวจคำตอบ" onClose={() => setVerificationOpen(false)}>
