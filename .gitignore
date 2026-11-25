@@ -1,0 +1,8 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+public/mediapipe/wasm/
+public/mediapipe/vision-worker-bundle.js
+public/licenses/npm/
+*.log
