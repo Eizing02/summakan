@@ -2,6 +2,8 @@
 
 เกมเว็บภาษาไทยสำหรับ ม.1 นักเรียนหยิบเครื่องหมายและตัวเลขเอง ตาชั่งตอบสนองตามผลต่างและจัดรูปเมื่อการดำเนินการสะสมทั้งสองฝั่งสมมูลกัน เกมตรวจคำตอบโดยแทนค่าในสมการเดิมก่อนจบภารกิจ
 
+[เปิด Balance Quest บน Cloudflare Pages](https://summakan.pages.dev/)
+
 ## เริ่มใช้งาน
 
 ใช้ Node.js 20.19 ขึ้นไปในสาย 20 หรือ 22.12 ขึ้นไป และเบราว์เซอร์รุ่นที่รองรับ JavaScript BigInt
@@ -35,7 +37,12 @@ npm run test:e2e
 
 ## เผยแพร่บน Cloudflare Pages
 
-สำหรับโปรเจกต์ Cloudflare Pages ที่เชื่อม Git ให้ใช้สาขา `main` ของ repository นี้ ตั้ง Build command เป็น `npm run build` และ Build output directory เป็น `dist` สำหรับโปรเจกต์ที่ใช้ Direct Upload ให้สร้าง `dist` แล้วส่งเข้าชื่อโปรเจกต์เดิมด้วย Wrangler บัญชีที่ใช้ต้องมีสิทธิ์ deploy โปรเจกต์นั้น [เอกสาร Cloudflare Pages](https://developers.cloudflare.com/pages/get-started/direct-upload/)
+โฮสต์ใช้ Direct Upload ไปที่โปรเจกต์ `summakan` และสาขา `main` บัญชี Wrangler ต้องมีสิทธิ์เผยแพร่โปรเจกต์นี้ [เอกสาร Cloudflare Pages](https://developers.cloudflare.com/pages/get-started/direct-upload/)
+
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name summakan --branch main
+```
 
 [GitHub Actions](.github/workflows/ci.yml) ตรวจเทสต์และ build ของซอร์สก่อนใช้ไฟล์ไปเผยแพร่ที่ Cloudflare
 
