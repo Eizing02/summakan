@@ -80,9 +80,10 @@ test('invalid drop, removable pending operations, undo, resize, fullscreen and p
   await place(page, '+', 'right');
   await place(page, '4', 'right');
   await expect.poll(async () => +(await anchor(page, 'right').getAttribute('data-angle'))!).toBeLessThan(-0.2);
-  const before = (await anchor(page, 'right').boundingBox())!.x;
+  const projectedX = () => anchor(page, 'right').evaluate(node => node.style.getPropertyValue('--anchor-x'));
+  const before = await projectedX();
   await page.setViewportSize({ width: 1160, height: 640 });
-  await expect.poll(async () => (await anchor(page, 'right').boundingBox())!.x).not.toBe(before);
+  await expect.poll(projectedX).not.toBe(before);
   const pending = page.getByRole('button', { name: 'หยิบ + 4 ออกจากฝั่งขวา' });
   await to(page, pending, page.locator('.inventory-header'));
   await expect.poll(async () => +(await anchor(page, 'right').getAttribute('data-angle'))!).toBe(0);
@@ -154,7 +155,8 @@ test('2D mobile fallback supports click and keyboard, with the scale and invento
   await page.goto('/');
   await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).click();
   await expect(page.locator('.vector-scale')).toBeVisible();
-  await expect(page.locator('.inventory')).toBeInViewport();
+  await expect(page.locator('.number-rail')).toBeInViewport();
+  await expect(page.locator('.operator-rail')).toBeInViewport();
   await tile(page, '−').focus();
   await page.keyboard.press('Enter');
   await slot(page, 'left').focus();
@@ -183,7 +185,7 @@ test('large digit tiles and both wide drop regions work away from the pans', asy
 
   await page.setViewportSize({ width: 1280, height: 720 });
   const wideTile = (await tile(page, '4').boundingBox())!;
-  expect(wideTile.width).toBeGreaterThanOrEqual(100);
+  expect(wideTile.width).toBeGreaterThanOrEqual(44);
   expect(wideTile.height).toBeGreaterThanOrEqual(44);
   const { x, y, width, height } = wideTile;
   await page.mouse.move(x + width / 2, y + height / 2);
@@ -199,6 +201,40 @@ test('large digit tiles and both wide drop regions work away from the pans', asy
   const right = (await region('right').boundingBox())!;
   await region('right').click({ position: { x: right.width - 20, y: 146 } });
   await expect(slot(page, 'right')).toHaveAccessibleName(/วางตัวเลข/);
+});
+
+test.describe('edge inventories on touch screens', () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 780 } });
+
+  test('taps and drags across the stage while both inventories stay at the edges', async ({ page, context }) => {
+    await page.addInitScript(() => localStorage.setItem('balance-quest-preferences', JSON.stringify({ quality: '2d', reduced: true, mute: true })));
+    await page.goto('/');
+    await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).tap();
+    const lab = (await page.locator('.lab').boundingBox())!;
+    const digits = (await page.getByRole('group', { name: 'ตัวเลข' }).boundingBox())!;
+    const operators = (await page.getByRole('group', { name: 'เครื่องหมาย' }).boundingBox())!;
+    expect(digits.x).toBeLessThan(12);
+    expect(digits.x + digits.width).toBeLessThan(lab.x);
+    expect(operators.x).toBeGreaterThan(lab.x + lab.width);
+    expect(operators.x + operators.width).toBeGreaterThan(378);
+
+    await tile(page, '+').tap();
+    await slot(page, 'left').tap();
+    await expect(slot(page, 'left')).toHaveAccessibleName(/วางตัวเลข/);
+    const digit = (await tile(page, '3').boundingBox())!;
+    const from = { x: digit.x + digit.width / 2, y: digit.y + digit.height / 2 };
+    const to = { x: lab.x + 13, y: lab.y + lab.height * .68 };
+    const touch = await context.newCDPSession(page);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+    for (const fraction of [.2, .45, .75, 1]) {
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{
+        x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction,
+      }] });
+    }
+    await expect(page.locator('[data-drop-region="left"]')).toHaveAttribute('data-over', 'true');
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect(page.getByTestId('expression-left')).toHaveAttribute('aria-label', 'x + 3 + 3');
+  });
 });
 
 test('a level scale refuses to simplify when the two transformations are different', async ({ page }) => {

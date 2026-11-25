@@ -10,7 +10,7 @@ Mode: Experience
 
 **Story** อ่านภารกิจ เลือกเครื่องหมายและตัวเลข สังเกตการเปลี่ยนแปลง แล้วตรวจคำตอบด้วยการแทนค่า
 
-**First viewport** HUD ด้านบน เวทีตาชั่งกลางจอ คลังแถวล่าง เมนูเปิดบนเวทีเดียวกัน ตัวควบคุมรองอยู่ตามขอบ
+**First viewport** HUD ด้านบน คลังตัวเลขขอบซ้าย เวทีตาชั่งตรงกลาง คลังเครื่องหมายขอบขวา แถวล่างเป็นข้อความสถานะและคืนวัตถุ
 
 **Form** seed: none (pinned) — “Stylized 3D Cartoon”, “Golden Mechanical Balance”, “Fixed Camera”, “Minimal Game HUD”.
 

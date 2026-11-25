@@ -115,7 +115,7 @@ function Scale({ target, reduced, mood, anchors, quality, panTiles, lowerQuality
     const height = size.height;
     const resized = width !== position.current.width || height !== position.current.height;
     if (resized) {
-      cam.zoom = Math.min(width / (width < 660 ? 10.5 : 14.3), height / 5.75);
+      cam.zoom = Math.min(width / (width < 660 ? 10.5 : 14.3), height / (anchors ? 6.55 : 5.75));
       cam.updateProjectionMatrix();
     }
     const angle = spring.current.update(target, delta, reduced);

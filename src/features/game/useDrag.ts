@@ -36,17 +36,12 @@ function handTile(element: Element | null, point: Point) {
 }
 
 function handPosition(surface: HTMLElement, point: Point): Point | null {
-  const board = surface.getBoundingClientRect();
-  const lab = surface.querySelector('.lab')?.getBoundingClientRect();
-  const first = surface.querySelector('.digits .inventory-tile:first-child')?.getBoundingClientRect();
-  const lastDigit = surface.querySelector('.digits .inventory-tile:last-child')?.getBoundingClientRect();
-  const lastOperator = surface.querySelector('.operators .inventory-tile:last-child')?.getBoundingClientRect();
-  if (!lab || !first || !lastDigit || !lastOperator) return null;
-  const left = Math.max(0, board.left, first.left + Math.min(16, first.width * .25));
-  const right = Math.min(window.innerWidth - 1, board.right - 1, lastOperator.right - Math.min(16, lastOperator.width * .25));
-  const top = Math.max(0, board.top, lab.top + 8);
-  const bottom = Math.min(window.innerHeight - 1, board.bottom - 1,
-    lastDigit.bottom - lastDigit.height * .24, lastOperator.bottom - lastOperator.height * .24);
+  const field = surface.querySelector('.playfield')?.getBoundingClientRect();
+  if (!field) return null;
+  const left = Math.max(12, field.left + 12);
+  const right = Math.min(window.innerWidth - 12, field.right - 12);
+  const top = Math.max(12, field.top + 8);
+  const bottom = Math.min(window.innerHeight - 12, field.bottom - 8);
   if (right < left || bottom < top) return null;
   return { x: left + point.x * (right - left), y: top + point.y * (bottom - top) };
 }
@@ -201,16 +196,24 @@ export function useDrag(
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && held.current) finish({ inventory: false });
     };
+    const blur = () => {
+      const item = held.current;
+      if (item && !item.hand && item.pointer !== null) finish({ inventory: false });
+    };
     const resize = () => { if (held.current) moveGhost(held.current.point); };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', cancel);
+    window.addEventListener('lostpointercapture', cancel);
+    window.addEventListener('blur', blur);
     window.addEventListener('keydown', key);
     window.addEventListener('resize', resize);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('lostpointercapture', cancel);
+      window.removeEventListener('blur', blur);
       window.removeEventListener('keydown', key);
       window.removeEventListener('resize', resize);
       window.clearTimeout(returnTimer.current);

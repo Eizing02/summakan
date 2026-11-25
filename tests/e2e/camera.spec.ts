@@ -99,7 +99,7 @@ test('first play waits for camera consent and cannot continue after denial', asy
   await expect(page.getByText('เบราว์เซอร์ยังไม่อนุญาตให้ใช้กล้อง', { exact: false })).toBeVisible();
   await expect(page.getByText(/เปิดใน Chrome หรือ Edge โดยตรง/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'ใช้เมาส์', exact: true })).toHaveCount(0);
-  await expect(page.locator('.inventory')).toHaveCount(0);
+  await expect(page.locator('.playfield')).toHaveCount(0);
   await page.getByRole('dialog').getByRole('button', { name: 'ปิด', exact: true }).click();
   await expect(page.getByRole('button', { name: 'เริ่มเรียนรู้' })).toBeVisible();
 });
@@ -126,7 +126,7 @@ test('first race starts the soundtrack on interaction and waits for the camera b
   await camera.getByRole('button', { name: 'เปิดกล้อง', exact: true }).click();
   await camera.getByRole('button', { name: 'ใช้กล้อง', exact: true }).click();
   await expect(page.getByRole('timer')).toHaveText('05:00');
-  await expect(page.locator('.inventory')).toBeVisible();
+  await expect(page.locator('.playfield')).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('balance-quest-first-camera'))).toBe('true');
 });
 
@@ -222,7 +222,7 @@ test('camera stays on after solving, can restart on results, and continues into 
   await startCamera();
   const inference = await page.locator('html').getAttribute('data-inference');
   await page.getByRole('button', { name: 'โจทย์ถัดไป' }).click();
-  await expect(page.locator('.inventory')).toBeVisible();
+  await expect(page.locator('.playfield')).toBeVisible();
   await expect(page.getByRole('button', { name: 'ปิดกล้อง' })).toBeVisible();
   await expect.poll(() => page.locator('html').getAttribute('data-inference')).not.toBe(inference);
   expect(await stream()).toEqual({ starts: 2, track: 'live' });
@@ -288,6 +288,7 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   const digit = page.locator('.inventory-tile[data-tile="3"]');
   const tile = (await digit.boundingBox())!;
   const move = moveSyntheticHand(page);
+  const field = (await page.locator('.playfield').boundingBox())!;
   const lab = (await page.locator('.lab').boundingBox())!;
   const first = (await page.locator('.digits .inventory-tile').first().boundingBox())!;
   const rowOneEnd = (await page.locator('.digits .inventory-tile').nth(4).boundingBox())!;
@@ -299,12 +300,14 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   expect(first.x).toBe(rowTwoStart.x);
   expect(rowTwoStart.y).toBeGreaterThan(first.y);
   expect(firstOp.x).toBeGreaterThan(rowOneEnd.x + rowOneEnd.width);
-  expect(firstOp.y).toBe(first.y);
-  expect(lastOp.y).toBe(last.y);
-  expect(first.y).toBeGreaterThanOrEqual(lab.y + lab.height);
-  const left = first.x + Math.min(16, first.width * .25);
-  const right = lastOp.x + lastOp.width - Math.min(16, lastOp.width * .25);
-  const top = lab.y + 8, bottom = Math.min(last.y + last.height * .76, lastOp.y + lastOp.height * .76);
+  expect(first.x).toBeLessThan(20);
+  expect(last.x + last.width).toBeLessThanOrEqual(lab.x);
+  expect(firstOp.x).toBeGreaterThanOrEqual(lab.x + lab.width);
+  expect(lastOp.x + lastOp.width).toBeGreaterThan(field.width - 20);
+  expect(first.y).toBeLessThan(lab.y + lab.height / 2);
+  expect(last.y).toBeGreaterThan(lab.y + lab.height / 2);
+  const left = field.x + 12, right = field.x + field.width - 12;
+  const top = field.y + 8, bottom = field.y + field.height - 8;
   const setPose = async (x: number, y: number, pinched: boolean) => {
     await move(.175 + .65 * (x - left) / (right - left), .175 + .65 * (y - top) / (bottom - top), pinched);
   };
@@ -329,7 +332,7 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   await expect(page.locator('html')).not.toHaveAttribute('data-inference', beforeDelay!);
   await expect(cursor).toHaveAttribute('data-mode', 'holding');
   const bounds = (await region.boundingBox())!;
-  const x = left + 12, y = bounds.y + bounds.height * .66;
+  const x = bounds.x + 20, y = bounds.y + bounds.height * .66;
   for (let progress = .1; progress <= 1.01; progress += .1) {
     await setPose(tile.x + (x - tile.x) * progress, tile.y + tile.height / 2 + (y - tile.y - tile.height / 2) * progress, true);
   }

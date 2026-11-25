@@ -15,16 +15,26 @@ function VectorScale({ target, reduced, anchors, mood }: SceneProps) {
     const spring = new BalanceSpring();
     let frame = 0;
     let previous = performance.now();
+    let angleDrawn = NaN;
+    let anchorsDrawn: SceneProps['anchors'];
+    let sizeChanged = true;
+    const observer = new ResizeObserver(() => { sizeChanged = true; });
+    if (svg.current) observer.observe(svg.current);
     const animate = (time: number) => {
+      frame = requestAnimationFrame(animate);
       const value = values.current;
       const angle = spring.update(value.target, (time - previous) / 1000, value.reduced);
       previous = time;
+      if (!sizeChanged && angle === angleDrawn && value.anchors === anchorsDrawn) return;
+      sizeChanged = false;
+      angleDrawn = angle;
+      anchorsDrawn = value.anchors;
+      const matrix = value.anchors && svg.current?.getScreenCTM();
+      const rect = value.anchors && svg.current?.parentElement?.getBoundingClientRect();
       const degrees = angle * 180 / Math.PI;
       beam.current?.setAttribute('transform', `rotate(${-degrees} 500 152)`);
       left.current?.setAttribute('transform', `rotate(${degrees} 240 152)`);
       right.current?.setAttribute('transform', `rotate(${degrees} 760 152)`);
-      const matrix = svg.current?.getScreenCTM();
-      const rect = svg.current?.parentElement?.getBoundingClientRect();
       if (matrix && rect && value.anchors) {
         for (const side of ['left', 'right'] as const) {
           const offset = (side === 'left' ? -1 : 1) * 260;
@@ -37,13 +47,12 @@ function VectorScale({ target, reduced, anchors, mood }: SceneProps) {
           }
         }
       }
-      frame = requestAnimationFrame(animate);
     };
     frame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frame);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   }, []);
   const crystals = { idle: '#78ccff', uneven: '#ffa379', even: '#70e6b5', waiting: '#ebbe66', victory: '#ffed9e' };
-  return <svg className="vector-scale" ref={svg} viewBox="50 0 900 382" aria-hidden="true">
+  return <svg className="vector-scale" ref={svg} viewBox={anchors ? '50 0 900 476' : '50 0 900 382'} aria-hidden="true">
     <defs>
       <linearGradient id="scale-gold" x2="0" y2="1"><stop stopColor="#ffe6a0"/><stop offset=".44" stopColor="#bb782c"/><stop offset=".72" stopColor="#f5c35e"/><stop offset="1" stopColor="#73441c"/></linearGradient>
       <radialGradient id="scale-floor"><stop stopColor="#5d6d91" stopOpacity=".45"/><stop offset="1" stopColor="#25324a" stopOpacity="0"/></radialGradient>

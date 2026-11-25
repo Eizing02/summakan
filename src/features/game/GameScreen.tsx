@@ -278,76 +278,81 @@ export function GameScreen(props: GameProps) {
       </div>
     </div>
 
-    <div className="lab">
-      <BalanceScene target={target} mood={mood} anchors={anchors}
-        panTiles={{ left: tilesOnPan(state, 'left'), right: tilesOnPan(state, 'right') }}
-        quality={preferences.quality} reduced={preferences.reduced || cameraOpen || Boolean(panel) || state.phase === 'PAUSED' || race?.expired === true}/>
-      {enabled && dropTile && <div className="drop-regions" aria-hidden="true">
+    <div className="playfield">
+      <div className="tile-rail number-rail" data-return-inventory>
+        <p className="rail-caption" aria-hidden="true">ตัวเลข</p>
+        <div className="tile-group digits" role="group" aria-label="ตัวเลข">{digits.map(buttonFor)}</div>
+      </div>
+      <div className="lab">
+        <BalanceScene target={target} mood={mood} anchors={anchors}
+          panTiles={{ left: tilesOnPan(state, 'left'), right: tilesOnPan(state, 'right') }}
+          quality={preferences.quality} reduced={preferences.reduced || cameraOpen || Boolean(panel) || state.phase === 'PAUSED' || race?.expired === true}/>
+        {enabled && dropTile && <div className="drop-regions" aria-hidden="true">
+          {sides.map(side => {
+            const valid = canPlaceTile(state, side, dropTile);
+            return <div key={side} className="drop-region" data-drop-region={side} data-valid={valid} data-over={drag.overSide === side}
+              onClick={() => drag.finish({ side, inventory: false })}>
+              <span>{valid ? 'วางฝั่ง' + sideLabel[side] : 'ฝั่ง' + sideLabel[side] + (state.drafts[side] ? ' · รอตัวเลข' : ' · รอเครื่องหมาย')}</span>
+            </div>;
+          })}
+        </div>}
+        <div className="lab-top">
+          <div className="equation-plaque">
+            <span className="equation-label">{rounds ? 'สมการปัจจุบัน' : 'สมการเริ่มต้น'}</span>
+            <MathText className="base-equation" tex={equationText(state.base, true)}/>
+          </div>
+          <div className="stage-tools">
+            {options.hints && <button className="mini-button" aria-label="คำใบ้" disabled={lock} type="button" onClick={() => { setPanel('hint'); dispatch({ type: 'hint' }); sound('hint_open'); }}><Lightbulb size={17}/><span>คำใบ้</span></button>}
+            <button className="mini-button" aria-label="ย้อนกลับ" type="button" disabled={!state.undo.length || state.held || lock} onClick={() => dispatch({ type: 'undo' })}><Undo2 size={17}/><span>ย้อนกลับ</span></button>
+            <button className="mini-button" aria-label="ประวัติ" type="button" onClick={() => setPanel('history')}><History size={17}/><span>ประวัติ</span></button>
+            <button className="mini-button help-button" type="button" aria-label="วิธีหยิบวัตถุ" title="วิธีหยิบวัตถุ" onClick={() => setPanel('controls')}><CircleHelp size={17}/></button>
+          </div>
+          <div className="lab-left">
+            {race ? <div className="race-hud">
+              <span className="timer race-clock" role="timer" aria-label="เวลาที่เหลือ" data-low={race.remaining <= 15}><Timer size={16}/>{readableSeconds(race.remaining).padStart(5, '0')}</span>
+              <span className="race-points" aria-label="คะแนน" data-testid="race-score">{race.score} คะแนน</span>
+            </div> : options.poe && <div className="stage-tools poe-actions">
+              <button className="mini-button" type="button" aria-label="คาดการณ์" onClick={() => setPanel('predict')}><BookOpen size={17}/><span>คาดการณ์</span></button>
+              {state.history.length > 0 && <button className="mini-button" type="button" aria-label="อธิบาย" onClick={() => setPanel('explain')}><BookOpen size={17}/><span>อธิบาย</span></button>}
+            </div>}
+            {!race && (options.elapsed || (mode === 'challenge' && options.challengeLimit && options.challengeTimer > 0)) && <span className="timer">{readableSeconds(Math.floor(activeMilliseconds(state, clock) / 1000))}</span>}
+          </div>
+        </div>
         {sides.map(side => {
-          const valid = canPlaceTile(state, side, dropTile);
-          return <div key={side} className="drop-region" data-drop-region={side} data-valid={valid} data-over={drag.overSide === side}
-            onClick={() => drag.finish({ side, inventory: false })}>
-            <span>{valid ? 'วางฝั่ง' + sideLabel[side] : 'ฝั่ง' + sideLabel[side] + (state.drafts[side] ? ' · รอตัวเลข' : ' · รอเครื่องหมาย')}</span>
+          const draft = state.drafts[side];
+          const possible = dropTile && canPlaceTile(state, side, dropTile);
+          return <div key={side} className={`pan-anchor pan-${side} ${state.animation || ''} ${drag.impact === side ? 'impact' : ''}`}
+            ref={side === 'left' ? leftAnchor : rightAnchor} data-testid={'anchor-' + side} data-pan-side={side}>
+            <div className="pan-math" aria-label={visualExpression(expressionText(state.base[side]), state.pending[side])} data-testid={'expression-' + side}>
+              <MathExpression state={state} side={side}/>
+            </div>
+            <button className={possible ? 'drop-slot valid-slot' : 'drop-slot'} data-drop-side={side}
+              type="button" disabled={!enabled} aria-label={'จาน' + sideLabel[side] + ' · ' + (draft ? 'วางตัวเลข' : 'วางเครื่องหมาย')}
+              onClick={event => snap(side, event.currentTarget)}>
+              {draft ? <><TileFace tile={draft.operator}/>{draft.negative && <span>−</span>}<span className="slot-box">?</span></> : <><Plus size={15}/><span>จาน{sideLabel[side]}</span></>}
+            </button>
+            {(state.pending[side].length > 0 || draft) && <div className="pending-line">
+              {state.pending[side].map((operation, index) => pendingToken(side, index, operation.operator, operation.operator + ' ' + operation.value.toString()))}
+              {draft && pendingToken(side, 'draft', draft.operator, draft.operator + (draft.negative ? ' −' : ' …'))}
+            </div>}
           </div>;
         })}
-      </div>}
-      <div className="lab-top">
-        <div className="equation-plaque">
-          <span className="equation-label">{rounds ? 'สมการปัจจุบัน' : 'สมการเริ่มต้น'}</span>
-          <MathText className="base-equation" tex={equationText(state.base, true)}/>
-        </div>
-        <div className="stage-tools">
-          {options.hints && <button className="mini-button" aria-label="คำใบ้" disabled={lock} type="button" onClick={() => { setPanel('hint'); dispatch({ type: 'hint' }); sound('hint_open'); }}><Lightbulb size={17}/><span>คำใบ้</span></button>}
-          <button className="mini-button" aria-label="ย้อนกลับ" type="button" disabled={!state.undo.length || state.held || lock} onClick={() => dispatch({ type: 'undo' })}><Undo2 size={17}/><span>ย้อนกลับ</span></button>
-          <button className="mini-button" aria-label="ประวัติ" type="button" onClick={() => setPanel('history')}><History size={17}/><span>ประวัติ</span></button>
-          <button className="mini-button help-button" type="button" aria-label="วิธีหยิบวัตถุ" title="วิธีหยิบวัตถุ" onClick={() => setPanel('controls')}><CircleHelp size={17}/></button>
-        </div>
-        <div className="lab-left">
-          {race ? <div className="race-hud">
-            <span className="timer race-clock" role="timer" aria-label="เวลาที่เหลือ" data-low={race.remaining <= 15}><Timer size={16}/>{readableSeconds(race.remaining).padStart(5, '0')}</span>
-            <span className="race-points" aria-label="คะแนน" data-testid="race-score">{race.score} คะแนน</span>
-          </div> : options.poe && <div className="stage-tools poe-actions">
-            <button className="mini-button" type="button" onClick={() => setPanel('predict')}><BookOpen size={17}/><span>คาดการณ์</span></button>
-            {state.history.length > 0 && <button className="mini-button" type="button" onClick={() => setPanel('explain')}><BookOpen size={17}/><span>อธิบาย</span></button>}
-          </div>}
-          {!race && (options.elapsed || (mode === 'challenge' && options.challengeLimit && options.challengeTimer > 0)) && <span className="timer">{readableSeconds(Math.floor(activeMilliseconds(state, clock) / 1000))}</span>}
+        {state.animation && !preferences.reduced && <div className={'magic-ring magic-' + state.animation} aria-hidden="true"/>}
+        {mode === 'challenge' && options.challengeLimit && <div className="challenge-label"><Gem size={14}/> {challenges[props.challenge]}{props.challenge === 'rounds' ? ' · ' + options.maxRounds + ' รอบ' : ''}</div>}
+        <div className="stage-footer">
+          <p className={'balance-status status-' + mood} role="status"><Scale size={17}/>{status}{options.difference && <span>Δ {balance.difference.toString()}</span>}</p>
         </div>
       </div>
-      {sides.map(side => {
-        const draft = state.drafts[side];
-        const possible = dropTile && canPlaceTile(state, side, dropTile);
-        return <div key={side} className={`pan-anchor pan-${side} ${state.animation || ''} ${drag.impact === side ? 'impact' : ''}`}
-          ref={side === 'left' ? leftAnchor : rightAnchor} data-testid={'anchor-' + side} data-pan-side={side}>
-          <div className="pan-math" aria-label={visualExpression(expressionText(state.base[side]), state.pending[side])} data-testid={'expression-' + side}>
-            <MathExpression state={state} side={side}/>
-          </div>
-          <button className={possible ? 'drop-slot valid-slot' : 'drop-slot'} data-drop-side={side}
-            type="button" disabled={!enabled} aria-label={'จาน' + sideLabel[side] + ' · ' + (draft ? 'วางตัวเลข' : 'วางเครื่องหมาย')}
-            onClick={event => snap(side, event.currentTarget)}>
-            {draft ? <><TileFace tile={draft.operator}/>{draft.negative && <span>−</span>}<span className="slot-box">?</span></> : <><Plus size={15}/><span>จาน{sideLabel[side]}</span></>}
-          </button>
-          {(state.pending[side].length > 0 || draft) && <div className="pending-line">
-            {state.pending[side].map((operation, index) => pendingToken(side, index, operation.operator, operation.operator + ' ' + operation.value.toString()))}
-            {draft && pendingToken(side, 'draft', draft.operator, draft.operator + (draft.negative ? ' −' : ' …'))}
-          </div>}
-        </div>;
-      })}
-      {state.animation && !preferences.reduced && <div className={'magic-ring magic-' + state.animation} aria-hidden="true"/>}
-      {mode === 'challenge' && options.challengeLimit && <div className="challenge-label"><Gem size={14}/> {challenges[props.challenge]}{props.challenge === 'rounds' ? ' · ' + options.maxRounds + ' รอบ' : ''}</div>}
-      <div className="stage-footer">
-        <p className={'balance-status status-' + mood} role="status"><Scale size={17}/>{status}{options.difference && <span>Δ {balance.difference.toString()}</span>}</p>
+      <div className="tile-rail operator-rail" data-return-inventory>
+        <p className="rail-caption" aria-hidden="true">เครื่องหมาย</p>
+        <div className="tile-group operators" role="group" aria-label="เครื่องหมาย">{operators.map(buttonFor)}</div>
       </div>
     </div>
 
-    <div className="inventory" data-return-inventory>
-      <div className="inventory-header">
-        <p className="inventory-title">คลังมนตรา</p>
-        <p className="inventory-instruction" aria-live="polite">{drag.selection ? drag.selection.side ? 'ลากลงคลังหรือกดคืนเข้าคลังเพื่อนำคำสั่งออก' : 'ปล่อยวัตถุในฝั่งที่ต้องการ' : state.message || (
-          mode === 'tutorial' ? tutorial : 'หยิบเครื่องหมายไปที่จาน จากนั้นวางตัวเลข')}</p>
-        {drag.selection && <button type="button" className="mini-button" onClick={() => drag.finish({ inventory: true })}><X size={16}/> {drag.selection.side ? 'คืนเข้าคลัง' : 'ยกเลิกการหยิบ'}</button>}
-      </div>
-      <div className="tile-group digits" aria-label="ตัวเลข">{digits.map(buttonFor)}</div>
-      <div className="tile-group operators" aria-label="เครื่องหมาย">{operators.map(buttonFor)}</div>
+    <div className="inventory-header game-guide" data-return-inventory>
+      <p className="inventory-instruction" aria-live="polite">{drag.selection ? drag.selection.side ? 'ลากกลับเข้าคลังข้างจอเพื่อเอาคำสั่งออก' : 'ปล่อยวัตถุในฝั่งที่ต้องการ' : state.message || (
+        mode === 'tutorial' ? tutorial : 'หยิบเครื่องหมายจากขวา แล้ววางตัวเลขจากซ้าย')}</p>
+      {drag.selection && <button type="button" className="mini-button" onClick={() => drag.finish({ inventory: true })}><X size={16}/> {drag.selection.side ? 'คืนเข้าคลัง' : 'ยกเลิกการหยิบ'}</button>}
     </div>
 
     <HandCursor display={drag.cursor} reduced={preferences.reduced}/>
