@@ -326,6 +326,29 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   await expect(cursor).toHaveAttribute('data-mode', 'holding');
   await expect(ring).toHaveCSS('border-top-color', 'rgb(255, 211, 108)');
   await expect(fingers).not.toHaveAttribute('d', openPose!);
+  const draws = await page.evaluate(() => new Promise<{ inference?: string; cursorX: number; tileX: number }[]>(resolve => {
+    const testWindow = window as CameraTestWindow;
+    const anchor = document.querySelector('.hand-cursor')!;
+    const tile = document.querySelector('.drag-ghost')!;
+    const samples: { inference?: string; cursorX: number; tileX: number }[] = [];
+    testWindow.testPose = { ...testWindow.testPose!, x: testWindow.testPose!.x + .05 };
+    const sample = () => {
+      samples.push({
+        inference: document.documentElement.dataset.inference,
+        cursorX: anchor.getBoundingClientRect().x,
+        tileX: tile.getBoundingClientRect().x,
+      });
+      if (samples.length < 21) requestAnimationFrame(sample);
+      else resolve(samples);
+    };
+    requestAnimationFrame(sample);
+  }));
+  expect(draws.some((after, i) => {
+    const before = draws[i - 1];
+    if (!before || before.inference !== after.inference) return false;
+    const cursorStep = after.cursorX - before.cursorX;
+    return cursorStep > .5 && Math.abs(after.tileX - before.tileX - cursorStep) < .75;
+  })).toBe(true);
   await page.evaluate(() => (window as CameraTestWindow).testWorker?.postMessage({ type: 'test-hold', delay: 700 }));
   await expect(page.locator('html')).toHaveAttribute('data-test-delay', 'true');
   const beforeDelay = await page.locator('html').getAttribute('data-inference');

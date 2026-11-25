@@ -9,6 +9,7 @@ export type ObjectSource = { tile: Tile; side?: Side; index?: number | 'draft' }
 type Held = { source: ObjectSource; origin: Point; point: Point; pointer: number | null; moved: boolean; hand: boolean; over?: Side; releaseSide?: Side };
 type Ghost = { tile: Tile; returning: boolean };
 type DropTarget = { side?: Side; inventory: boolean };
+interface GhostBounds { width: number; height: number; maxX: number; maxY: number; protectedAreas: DOMRect[] }
 
 function tileSource(item: HTMLElement | null): ObjectSource | undefined {
   if (!item?.dataset.tile) return;
@@ -63,6 +64,9 @@ export function useDrag(
 ) {
   const held = useRef<Held | null>(null);
   const ghost = useRef<HTMLDivElement>(null);
+  const ghostBounds = useRef<GhostBounds | null>(null);
+  const ghostPosition = useRef(-1);
+  const drawnHand = useRef<Point | null>(null);
   const cursor = useRef<HandCursorDisplay>(null);
   const hover = useRef<HTMLElement | null>(null);
   const pinchTile = useRef<HTMLElement | null | undefined>(undefined);
@@ -75,35 +79,57 @@ export function useDrag(
   const context = useRef({ state, dispatch, enabled });
   context.current = { state, dispatch, enabled };
 
-  function moveGhost(point: Point) {
+  function measureGhost() {
     const node = ghost.current;
-    if (!node || !surface.current) return;
+    if (!node || !surface.current) { ghostBounds.current = null; return; }
     const width = node.offsetWidth, height = node.offsetHeight;
-    const maxX = Math.max(6, document.documentElement.clientWidth - width - 6);
-    const maxY = Math.max(6, window.innerHeight - height - 6);
-    const protectedAreas = Array.from(surface.current.querySelectorAll('.equation-plaque, .pan-math, .drop-slot'),
-      element => element.getBoundingClientRect());
+    ghostBounds.current = {
+      width, height,
+      maxX: Math.max(6, document.documentElement.clientWidth - width - 6),
+      maxY: Math.max(6, window.innerHeight - height - 6),
+      protectedAreas: Array.from(surface.current.querySelectorAll('.equation-plaque, .pan-math, .drop-slot'),
+        element => element.getBoundingClientRect()),
+    };
+  }
+
+  function drawGhost(point: Point) {
+    const node = ghost.current;
+    const bounds = ghostBounds.current;
+    if (!node || !bounds) return;
+    const { width, height, maxX, maxY, protectedAreas } = bounds;
     const candidates = [
       { x: point.x + 18, y: point.y - height - 10 }, { x: point.x - width - 18, y: point.y - height - 10 },
       { x: point.x + 23, y: point.y - height / 2 }, { x: point.x - width - 23, y: point.y - height / 2 },
       { x: point.x + 17, y: point.y + 16 }, { x: point.x - width - 17, y: point.y + 16 },
     ].map(({ x, y }) => ({ x: Math.min(maxX, Math.max(6, x)), y: Math.min(maxY, Math.max(6, y)) }));
-    const clear = candidates.find(({ x, y }) => protectedAreas.every(rect =>
-      x + width + 6 <= rect.left || x - 6 >= rect.right || y + height + 6 <= rect.top || y - 6 >= rect.bottom));
-    const position = clear ?? candidates[0];
-    node.dataset.clear = String(Boolean(clear));
-    node.style.setProperty('--ghost-x', position.x + 'px');
-    node.style.setProperty('--ghost-y', position.y + 'px');
+    const clear = ({ x, y }: Point) => protectedAreas.every(rect =>
+      x + width + 6 <= rect.left || x - 6 >= rect.right || y + height + 6 <= rect.top || y - 6 >= rect.bottom);
+    const previous = candidates[ghostPosition.current];
+    const index = previous && clear(previous) ? ghostPosition.current : candidates.findIndex(clear);
+    ghostPosition.current = index;
+    const position = candidates[index] ?? candidates[0];
+    if (node.dataset.clear !== String(index >= 0)) node.dataset.clear = String(index >= 0);
+    node.style.transform = `translate3d(${position.x}px, ${position.y}px, 0)`;
+  }
+
+  function moveGhost(point: Point) {
+    measureGhost();
+    drawGhost(point);
+  }
+
+  function onHandDrawn(point: Point) {
+    drawnHand.current = point;
+    if (held.current?.hand) drawGhost(point);
   }
   useLayoutEffect(() => {
-    if (!drawing) return;
-    if (held.current) moveGhost(held.current.point);
+    if (drawing && held.current) moveGhost(held.current.hand ? drawnHand.current ?? held.current.point : held.current.point);
   }, [drawing]);
 
   function start(source: ObjectSource, point: Point, pointer: number | null, hand: boolean) {
     const current = context.current;
     if (!current.enabled || !canEdit(current.state) || held.current) return;
     window.clearTimeout(returnTimer.current);
+    ghostPosition.current = -1;
     held.current = { source, origin: point, point, pointer, moved: false, hand };
     setSelection(source);
     setDrawing({ tile: source.tile, returning: false });
@@ -156,7 +182,10 @@ export function useDrag(
       item.over = target.side;
       setOverSide(target.side);
     }
-    moveGhost(point);
+    if (item.hand) {
+      measureGhost();
+      drawGhost(drawnHand.current ?? point);
+    } else moveGhost(point);
   }
 
   useEffect(() => {
@@ -200,7 +229,10 @@ export function useDrag(
       const item = held.current;
       if (item && !item.hand && item.pointer !== null) finish({ inventory: false });
     };
-    const resize = () => { if (held.current) moveGhost(held.current.point); };
+    const resize = () => {
+      const item = held.current;
+      if (item) moveGhost(item.hand ? drawnHand.current ?? item.point : item.point);
+    };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', cancel);
@@ -268,7 +300,7 @@ export function useDrag(
     }
     if (frame.state === 'PINCH_START' && pinchTile.current === undefined) pinchTile.current = tile;
     else if (frame.state !== 'PINCH_START' && frame.event !== 'grab') pinchTile.current = undefined;
-    if (!position || frame.state === 'TRACKING_LOST') { cursor.current?.fade(); return; }
+    if (!position || frame.state === 'TRACKING_LOST') { cursor.current?.fade(frame.event === 'cancel'); return; }
     if (frame.event === 'grab') {
       const aimed = pinchTile.current;
       const source = aimed && aimed.isConnected && aimed.matches('[data-tile]:not(:disabled)') && distanceToTile(position, aimed) <= 15
@@ -290,5 +322,5 @@ export function useDrag(
     cursor.current?.show(frame, position, Boolean(held.current?.hand), Boolean(element));
   }
 
-  return { drawing, ghost, cursor, selection, overSide, impact, pointerDown, keyboardPick, finish, handFrame, canHandGrab };
+  return { drawing, ghost, cursor, selection, overSide, impact, pointerDown, keyboardPick, finish, handFrame, canHandGrab, onHandDrawn };
 }

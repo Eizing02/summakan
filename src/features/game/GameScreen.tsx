@@ -355,7 +355,7 @@ export function GameScreen(props: GameProps) {
       {drag.selection && <button type="button" className="mini-button" onClick={() => drag.finish({ inventory: true })}><X size={16}/> {drag.selection.side ? 'คืนเข้าคลัง' : 'ยกเลิกการหยิบ'}</button>}
     </div>
 
-    <HandCursor display={drag.cursor} reduced={preferences.reduced}/>
+    <HandCursor display={drag.cursor} reduced={preferences.reduced} onMove={drag.onHandDrawn}/>
     {drag.drawing && <div className={'drag-ghost' + (drag.drawing.returning ? ' is-returning' : '')} ref={drag.ghost} aria-hidden="true"><TileFace tile={drag.drawing.tile}/></div>}
 
     {record && solved && (race
