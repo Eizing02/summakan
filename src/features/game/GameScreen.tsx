@@ -279,10 +279,6 @@ export function GameScreen(props: GameProps) {
     </div>
 
     <div className="playfield">
-      <div className="tile-rail number-rail" data-return-inventory>
-        <p className="rail-caption" aria-hidden="true">ตัวเลข</p>
-        <div className="tile-group digits" role="group" aria-label="ตัวเลข">{digits.map(buttonFor)}</div>
-      </div>
       <div className="lab">
         <BalanceScene target={target} mood={mood} anchors={anchors}
           panTiles={{ left: tilesOnPan(state, 'left'), right: tilesOnPan(state, 'right') }}
@@ -343,6 +339,10 @@ export function GameScreen(props: GameProps) {
           <p className={'balance-status status-' + mood} role="status"><Scale size={17}/>{status}{options.difference && <span>Δ {balance.difference.toString()}</span>}</p>
         </div>
       </div>
+      <div className="tile-rail number-rail" data-return-inventory>
+        <p className="rail-caption" aria-hidden="true">ตัวเลข</p>
+        <div className="tile-group digits" role="group" aria-label="ตัวเลข">{digits.map(buttonFor)}</div>
+      </div>
       <div className="tile-rail operator-rail" data-return-inventory>
         <p className="rail-caption" aria-hidden="true">เครื่องหมาย</p>
         <div className="tile-group operators" role="group" aria-label="เครื่องหมาย">{operators.map(buttonFor)}</div>
@@ -350,8 +350,8 @@ export function GameScreen(props: GameProps) {
     </div>
 
     <div className="inventory-header game-guide" data-return-inventory>
-      <p className="inventory-instruction" aria-live="polite">{drag.selection ? drag.selection.side ? 'ลากกลับเข้าคลังข้างจอเพื่อเอาคำสั่งออก' : 'ปล่อยวัตถุในฝั่งที่ต้องการ' : state.message || (
-        mode === 'tutorial' ? tutorial : 'หยิบเครื่องหมายจากขวา แล้ววางตัวเลขจากซ้าย')}</p>
+      <p className="inventory-instruction" aria-live="polite">{drag.selection ? drag.selection.side ? 'ลากกลับเข้าคลังเพื่อเอาคำสั่งออก' : 'ปล่อยวัตถุในฝั่งที่ต้องการ' : state.message || (
+        mode === 'tutorial' ? tutorial : 'หยิบเครื่องหมายก่อน แล้ววางตัวเลขในฝั่งเดียวกัน')}</p>
       {drag.selection && <button type="button" className="mini-button" onClick={() => drag.finish({ inventory: true })}><X size={16}/> {drag.selection.side ? 'คืนเข้าคลัง' : 'ยกเลิกการหยิบ'}</button>}
     </div>
 

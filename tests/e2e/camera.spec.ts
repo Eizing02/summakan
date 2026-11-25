@@ -313,19 +313,25 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   };
   const cursor = page.locator('.hand-cursor');
   const ring = cursor.locator('.hand-cursor-aim');
-  const fingers = cursor.locator('.hand-cursor-fingers');
+  const joints = cursor.locator('.hand-cursor-landmarks');
+  const tips = cursor.locator('.hand-cursor-tips');
+  const openHand = cursor.locator('.hand-cursor-shape');
   await setPose(tile.x - 2, tile.y + tile.height / 2, false);
   await expect(digit).toHaveClass(/hand-hover/);
   await expect(cursor).toHaveAttribute('data-mode', 'target');
   await expect(ring).toHaveCSS('border-top-color', 'rgb(211, 242, 255)');
-  await expect(fingers).toHaveCSS('stroke-opacity', '0.28');
-  const openPose = await fingers.getAttribute('d');
+  await expect(ring).toHaveCSS('width', '26px');
+  await expect(openHand).toHaveCSS('opacity', '0.68');
+  await expect(joints).toHaveAttribute('d', /^(?:M[^M]+){19}$/);
+  await expect(tips).toHaveAttribute('d', /^(?:M[^M]+){2}$/);
+  const openPose = await tips.getAttribute('d');
   await setPose(tile.x - 2, tile.y + tile.height / 2, true);
   const region = page.locator('[data-drop-region="left"]');
   await expect(region).toBeVisible();
   await expect(cursor).toHaveAttribute('data-mode', 'holding');
   await expect(ring).toHaveCSS('border-top-color', 'rgb(255, 211, 108)');
-  await expect(fingers).not.toHaveAttribute('d', openPose!);
+  await expect(openHand).toHaveCSS('opacity', '0.54');
+  await expect(tips).not.toHaveAttribute('d', openPose!);
   const draws = await page.evaluate(() => new Promise<{ inference?: string; cursorX: number; tileX: number }[]>(resolve => {
     const testWindow = window as CameraTestWindow;
     const anchor = document.querySelector('.hand-cursor')!;
@@ -364,7 +370,7 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   await expect(page.getByTestId('expression-left')).toHaveAttribute('aria-label', 'x + 3 + 3');
   await expect(region).toHaveCount(0);
   await expect(cursor).toHaveAttribute('data-mode', 'aim');
-  await expect(ring).toHaveCSS('border-top-color', 'rgb(158, 220, 255)');
+  await expect(ring).toHaveCSS('border-top-color', 'rgb(255, 252, 238)');
   await setPose(x, y, true);
   await expect(cursor).toHaveAttribute('data-pose', 'POINTING');
   await expect(cursor).toHaveAttribute('data-mode', 'aim');

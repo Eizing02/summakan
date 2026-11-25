@@ -203,20 +203,20 @@ test('large digit tiles and both wide drop regions work away from the pans', asy
   await expect(slot(page, 'right')).toHaveAccessibleName(/วางตัวเลข/);
 });
 
-test.describe('edge inventories on touch screens', () => {
+test.describe('responsive inventories on touch screens', () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 780 } });
 
-  test('taps and drags across the stage while both inventories stay at the edges', async ({ page, context }) => {
+  test('taps and drags from the bottom dock, and keeps it clear of the scale after rotation', async ({ page, context }) => {
     await page.addInitScript(() => localStorage.setItem('balance-quest-preferences', JSON.stringify({ quality: '2d', reduced: true, mute: true })));
     await page.goto('/');
     await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).tap();
     const lab = (await page.locator('.lab').boundingBox())!;
     const digits = (await page.getByRole('group', { name: 'ตัวเลข' }).boundingBox())!;
     const operators = (await page.getByRole('group', { name: 'เครื่องหมาย' }).boundingBox())!;
-    expect(digits.x).toBeLessThan(12);
-    expect(digits.x + digits.width).toBeLessThan(lab.x);
-    expect(operators.x).toBeGreaterThan(lab.x + lab.width);
-    expect(operators.x + operators.width).toBeGreaterThan(378);
+    expect(digits.y).toBeGreaterThanOrEqual(lab.y + lab.height);
+    expect(operators.y).toBe(digits.y);
+    expect(digits.x + digits.width).toBeLessThan(operators.x);
+    expect(lab.width).toBe(390);
 
     await tile(page, '+').tap();
     await slot(page, 'left').tap();
@@ -234,6 +234,33 @@ test.describe('edge inventories on touch screens', () => {
     await expect(page.locator('[data-drop-region="left"]')).toHaveAttribute('data-over', 'true');
     await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await expect(page.getByTestId('expression-left')).toHaveAttribute('aria-label', 'x + 3 + 3');
+
+    for (const viewport of [
+      { width: 320, height: 568 }, { width: 768, height: 1024 },
+      { width: 568, height: 320 }, { width: 667, height: 375 }, { width: 1040, height: 440 }, { width: 1366, height: 768 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const scale = (await page.locator('.lab').boundingBox())!;
+      const numberRail = (await page.locator('.number-rail').boundingBox())!;
+      const operatorRail = (await page.locator('.operator-rail').boundingBox())!;
+      if (viewport.height > viewport.width) {
+        expect(scale.width).toBeCloseTo(viewport.width, 0);
+        expect(numberRail.y).toBeGreaterThanOrEqual(scale.y + scale.height - 1);
+        expect(operatorRail.y).toBe(numberRail.y);
+      } else {
+        expect(numberRail.x).toBe(0);
+        expect(operatorRail.x + operatorRail.width).toBeCloseTo(viewport.width, 0);
+        expect(numberRail.x + numberRail.width).toBeCloseTo(scale.x, 0);
+        expect(operatorRail.x).toBeCloseTo(scale.x + scale.width, 0);
+      }
+      const inventory = page.locator('.inventory-tile');
+      for (const item of await inventory.all()) {
+        await expect(item).toBeInViewport({ ratio: 1 });
+        const box = (await item.boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+    }
   });
 });
 

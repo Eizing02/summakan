@@ -1,9 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, type RefObject } from 'react';
 import type { GestureFrame, Landmark, Point } from '../../core/input/gesture-machine';
 
-const fingers = [[0, 1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]];
-const palm = [0, 1, 2, 5, 9, 13, 17];
-
 export interface HandCursorDisplay {
   show: (frame: GestureFrame, point: Point, holding: boolean, hovering: boolean) => void;
   fade: (immediate?: boolean) => void;
@@ -18,14 +15,23 @@ function fitHand(landmarks: Landmark[], aspect: number) {
   const right = Math.max(...points.map(point => point.x));
   const top = Math.min(...points.map(point => point.y));
   const bottom = Math.max(...points.map(point => point.y));
-  const scale = 47 / Math.max(right - left, bottom - top, .05);
+  const scale = 53 / Math.max(right - left, bottom - top, .05);
   const centerX = (left + right) / 2, centerY = (top + bottom) / 2;
   return points.map(point => ({ x: 32 + (point.x - centerX) * scale, y: 32 + (point.y - centerY) * scale }));
 }
 
-function pathThrough(points: Point[], landmarkIds: number[]) {
-  const path = landmarkIds.map(id => points[id].x.toFixed(1) + ' ' + points[id].y.toFixed(1));
-  return 'M' + path.join('L');
+// Match the ordinary joints and larger fingertips in Thai-kum-prasom's camera overlay.
+function landmarkPaths(pose: Point[]) {
+  let joints = '', tips = '';
+  for (const [index, { x, y }] of pose.entries()) {
+    const tip = index === 4 || index === 8;
+    const radius = tip ? 4 : 2;
+    const diameter = radius * 2;
+    const dot = `M${(x - radius).toFixed(1)} ${y.toFixed(1)}a${radius} ${radius} 0 1 0 ${diameter} 0a${radius} ${radius} 0 1 0 -${diameter} 0z`;
+    if (tip) tips += dot;
+    else joints += dot;
+  }
+  return { joints, tips };
 }
 
 export function HandCursor({ display, reduced, onMove }: {
@@ -33,9 +39,8 @@ export function HandCursor({ display, reduced, onMove }: {
 }) {
   const root = useRef<HTMLDivElement>(null);
   const shape = useRef<SVGSVGElement>(null);
-  const skeleton = useRef<SVGPathElement>(null);
-  const outline = useRef<SVGPathElement>(null);
-  const palmShape = useRef<SVGPathElement>(null);
+  const jointMarks = useRef<SVGPathElement>(null);
+  const tipMarks = useRef<SVGPathElement>(null);
   const animation = useRef(0);
   const lostTimer = useRef(0);
   const visiblePoint = useRef<Point | null>(null);
@@ -49,17 +54,17 @@ export function HandCursor({ display, reduced, onMove }: {
   const previousTime = useRef(0);
 
   function draw(pose: Point[]) {
-    const fingerPath = fingers.map(chain => pathThrough(pose, chain)).join(' ');
-    outline.current?.setAttribute('d', fingerPath);
-    palmShape.current?.setAttribute('d', pathThrough(pose, palm) + 'Z');
-    skeleton.current?.setAttribute('d', fingerPath);
+    const paths = landmarkPaths(pose);
+    jointMarks.current?.setAttribute('d', paths.joints);
+    tipMarks.current?.setAttribute('d', paths.tips);
   }
 
   function drawPoint(point: Point) {
     const element = root.current;
     if (!element) return;
     visiblePoint.current = point;
-    element.style.transform = `translate3d(${point.x}px, ${point.y}px, 0)`;
+    const transform = `translate3d(${Math.round(point.x * 100) / 100}px, ${Math.round(point.y * 100) / 100}px, 0px)`;
+    if (element.style.transform !== transform) element.style.transform = transform;
     // Keep the hand drawing in view as the cursor approaches either edge.
     const x = Math.min(7, window.innerWidth - point.x - 66);
     const y = Math.min(5, window.innerHeight - point.y - 66);
@@ -169,11 +174,10 @@ export function HandCursor({ display, reduced, onMove }: {
   }, []);
 
   return <div ref={root} className="hand-cursor" data-mode="hidden" aria-hidden="true">
-    <span className="hand-cursor-aim"><i/></span>
+    <span className="hand-cursor-aim"/>
     <svg className="hand-cursor-shape" ref={shape} viewBox="0 0 64 64" focusable="false">
-      <path ref={palmShape} className="hand-cursor-palm"/>
-      <path ref={outline} className="hand-cursor-fingers"/>
-      <path ref={skeleton} className="hand-cursor-bones"/>
+      <path ref={jointMarks} className="hand-cursor-landmarks"/>
+      <path ref={tipMarks} className="hand-cursor-tips"/>
     </svg>
   </div>;
 }
