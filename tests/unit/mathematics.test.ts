@@ -65,11 +65,20 @@ describe('exact arithmetic and the equality properties', () => {
     expect(() => makeQuestion('11x=2', 6, 'unsupported')).toThrow();
     expect(makeQuestion('6 = 2x', 3, 'right').expectedSolution.toString()).toBe('3');
   });
-  it('ships 60 distinct validated questions and prevents random repeats', () => {
-    expect(questionBank).toHaveLength(60);
+  it('ships 360 distinct validated questions and selects the shared bank without repeats', () => {
+    expect(questionBank).toHaveLength(360);
     const signatures = new Set(questionBank.map(question => equationText(question.equation)));
-    expect(signatures.size).toBe(60);
-    for (let level = 1; level <= 6; level += 1) expect(questionBank.filter(item => item.level === level)).toHaveLength(10);
-    expect(signatures.has(equationText(randomQuestion(1, signatures, () => 0)!.equation))).toBe(false);
+    expect(signatures.size).toBe(360);
+    for (let level = 1; level <= 6; level += 1) {
+      const used = new Set<string>();
+      for (let i = 0; i < 60; i++) {
+        const question = randomQuestion(level, used, () => 0)!;
+        expect(question.level).toBe(level);
+        expect(verifySolution(question.equation, question.expectedSolution).valid).toBe(true);
+        used.add(equationText(question.equation));
+      }
+      expect(used.size).toBe(60);
+      expect(randomQuestion(level, used)).toBeNull();
+    }
   });
 });

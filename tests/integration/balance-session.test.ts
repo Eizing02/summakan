@@ -48,8 +48,28 @@ describe('spring and game transactions', () => {
     state = gameReducer(state, { type: 'commit', revision: state.revision });
     expect(equationText(state.base)).toBe('x = 8');
     expect(state.history[0].right).toBe('5 + 1 + 1 + 1');
-    expect(gameReducer(state, { type: 'verify', value: '7', now: 10 }).phase).toBe('SOLVED');
-    expect(gameReducer(state, { type: 'verify', value: '8', now: 10 }).phase).toBe('RESULT');
+    expect(state.phase).toBe('RESULT');
+    expect(state.verification?.valid).toBe(true);
+    expect(state.verification?.left.toString()).toBe('5');
+    expect(state.verification?.right.toString()).toBe('5');
+  });
+  it('credits an exact fraction already earned before the deadline, including during animation', () => {
+    const setup = () => operate(operate(newSession(parseEquation('3x=2').equation, '3x=2', 0), 'left', '÷', '3'), 'right', '÷');
+    for (const at of [999, 1000, 1001]) {
+      const waiting = gameReducer(gameReducer(setup(), { type: 'hold', held: true, now: at }), { type: 'drop', side: 'right', tile: '3', now: at });
+      const animating = gameReducer(waiting, { type: 'begin', revision: waiting.revision, now: at });
+      for (const state of [waiting, animating]) {
+        const final = gameReducer(state, { type: 'deadline', deadline: 1000 });
+        if (at < 1000) {
+          expect(equationText(final.base)).toBe('x = 2/3');
+          expect(final.phase).toBe('RESULT');
+          expect(final.solvedAt).toBe(999);
+          expect(final.verification?.valid).toBe(true);
+        } else expect(final).toBe(state);
+      }
+    }
+    const unfinished = operate(operate(create('2x+3=9'), 'left', '−', '3'), 'right', '−', '3');
+    expect(gameReducer(unfinished, { type: 'deadline', deadline: unfinished.started + 1000 })).toBe(unfinished);
   });
   it('clears a canceled settling timer and commits each animation only once', () => {
     vi.useFakeTimers();

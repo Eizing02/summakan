@@ -13,6 +13,16 @@ function hand(pinched: boolean, handedness: ObservedHand['handedness'] = 'Right'
   return { landmarks, confidence, handedness };
 }
 
+const hit = () => true;
+function poseFrames(machine: GestureMachine, pinched: boolean, start: number, count: number, offset = 0) {
+  return Array.from({ length: count }, (_, i) => machine.frame([hand(pinched, 'Right', offset)], start + 40 * i, 1, defaultCalibration, hit));
+}
+const events = (frames: ReturnType<typeof poseFrames>) => frames.flatMap(frame => frame?.event ? [frame.event] : []);
+function hold(machine: GestureMachine) {
+  poseFrames(machine, false, 0, 5);
+  return poseFrames(machine, true, 200, 12);
+}
+
 describe('21-point hand input', () => {
   it('mirrors horizontal motion and scales coordinates during calibration', () => {
     const settings = { ...defaultCalibration, reach: 1, cursorGain: 1 };
@@ -31,48 +41,58 @@ describe('21-point hand input', () => {
     expect(cursorPoint({ x: .39, y: .58 }, config)).toEqual({ x: 1, y: 1 });
     expect(cursorPoint({ x: .575, y: .465 }, config).y).toBeCloseTo(.5);
   });
-  it('holds steady over tiny jitter and follows deliberate movement including while pinching', () => {
+  it('attenuates jitter and follows deliberate movement even while pinching', () => {
     const machine = new GestureMachine();
-    const start = machine.frame([hand(false)], 0, 1, defaultCalibration)?.point?.x;
+    const start = machine.frame([hand(false)], 0, 1, defaultCalibration)?.point?.x ?? 0;
     for (let i = 1; i <= 10; i++) {
-      expect(machine.frame([hand(false, 'Right', i % 2 ? -.002 : .002)], i * 40, 1, defaultCalibration)?.point?.x).toBe(start);
+      const point = machine.frame([hand(false, 'Right', i % 2 ? -.002 : .002)], i * 40, 1, defaultCalibration)?.point;
+      expect(Math.abs(point!.x - start)).toBeLessThan(.002);
     }
-    machine.frame([hand(true)], 440, 1, defaultCalibration);
-    expect(machine.frame([hand(true)], 480, 1, defaultCalibration)?.event).toBe('grab');
+    const held = poseFrames(machine, true, 440, 9);
+    expect(events(held)).toEqual(['grab']);
     let frame;
     for (let i = 1; i <= 8; i++) {
-      frame = machine.frame([hand(true, 'Right', Math.min(i, 3) * .06)], 480 + i * 40, 1, defaultCalibration);
+      frame = machine.frame([hand(true, 'Right', Math.min(i, 3) * .06)], 760 + i * 40, 1, defaultCalibration);
     }
     expect(frame?.state).toBe('DRAGGING');
     expect(frame?.point?.x).toBeCloseTo(cursorPoint({ x: .63, y: .42 }, defaultCalibration).x, 1);
   });
-  it('arms only after release, debounces a grab and release, and rejects duplicate or stale frames', () => {
+  it('arms only after release and emits one grab and one drop', () => {
     const machine = new GestureMachine();
-    const update = (time: number, pinch: boolean) => machine.frame([hand(pinch)], time, 4 / 3, defaultCalibration);
-    expect(update(0, true)?.event).toBeUndefined();
-    expect(update(40, true)?.event).toBeUndefined();
-    update(80, false);
-    expect(update(120, true)?.state).toBe('PINCH_START');
-    expect(update(155, true)?.event).toBe('grab');
-    expect(update(155, true)).toBeNull();
-    expect(update(150, false)).toBeNull();
-    expect(update(190, true)?.state).toBe('DRAGGING');
-    expect(update(230, false)?.state).toBe('DROP_PENDING');
-    expect(update(270, false)?.event).toBe('drop');
-    expect(update(310, false)?.event).toBeUndefined();
+    expect(events(poseFrames(machine, true, 0, 7))).toEqual([]);
+    poseFrames(machine, false, 300, 9);
+    expect(events(poseFrames(machine, true, 680, 12))).toEqual(['grab']);
+    expect(machine.frame([hand(true)], 1120, 1, defaultCalibration)).toBeNull();
+    expect(machine.frame([hand(false)], 1100, 1, defaultCalibration)).toBeNull();
+    expect(events(poseFrames(machine, false, 1160, 12))).toEqual(['drop']);
   });
-  it('cancels if the hand disappears and never commits on unobserved release', () => {
+  it('keeps the drop point from the first open pose even as the hand moves', () => {
     const machine = new GestureMachine();
-    const next = (time: number, hands: ObservedHand[]) => machine.frame(hands, time, 1, defaultCalibration);
-    next(0, [hand(false)]);
-    next(40, [hand(true)]);
-    expect(next(80, [hand(true)])?.event).toBe('grab');
-    expect(next(115, [])?.event).toBeUndefined();
-    expect(next(155, [hand(false)])?.event).toBe('cancel');
-    next(195, [hand(true)]);
-    expect(next(235, [hand(true)])?.event).toBe('grab');
-    expect(next(515, [])?.event).toBe('cancel');
-    expect(next(565, [])?.event).toBeUndefined();
+    expect(events(hold(machine))).toEqual(['grab']);
+    const start = machine.frame([hand(false)], 680, 1, defaultCalibration);
+    expect(start?.state).toBe('DROP_PENDING');
+    const later = poseFrames(machine, false, 720, 5, .1);
+    expect(later.find(frame => frame?.event === 'drop')?.point).toEqual(start?.point);
+    expect(events(later)).toEqual(['drop']);
+  });
+  it('cancels a confirmed release after occlusion, or cancels after sustained loss', () => {
+    for (const recovery of [false, true]) {
+      const machine = new GestureMachine();
+      hold(machine);
+      expect(machine.frame([], 690, 1, defaultCalibration)?.event).toBeUndefined();
+      const steps = recovery ? poseFrames(machine, false, 730, 6) :
+        [machine.frame([], 1060, 1, defaultCalibration)];
+      expect(events(steps)).toEqual(['cancel']);
+      expect(machine.frame([], 1150, 1, defaultCalibration)?.event).toBeUndefined();
+    }
+  });
+  it('keeps holding through a brief detection gap and a brief opening', () => {
+    const machine = new GestureMachine();
+    hold(machine);
+    expect(machine.frame([], 750, 1, defaultCalibration)?.event).toBeUndefined();
+    expect(machine.frame([hand(false)], 780, 1, defaultCalibration)?.state).toBe('DROP_PENDING');
+    expect(machine.frame([hand(true)], 820, 1, defaultCalibration)).toMatchObject({ state: 'DRAGGING', event: undefined });
+    expect(events(poseFrames(machine, false, 860, 8))).toEqual(['drop']);
   });
   it('respects the chosen hand and stays locked despite a higher-confidence bystander', () => {
     const machine = new GestureMachine();

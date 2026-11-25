@@ -1,6 +1,6 @@
-export type Mode = 'tutorial' | 'learning' | 'practice' | 'challenge' | 'teacher';
+export type Mode = 'tutorial' | 'learning' | 'practice' | 'challenge' | 'teacher' | 'race';
 export const modeNames: Record<Mode, string> = {
-  tutorial: 'วิธีเล่น', learning: 'บทเรียน', practice: 'ฝึกแก้สมการ', challenge: 'ภารกิจท้าทาย', teacher: 'ชุดกิจกรรมครู',
+  tutorial: 'วิธีเล่น', learning: 'บทเรียน', practice: 'ฝึกแก้สมการ', challenge: 'ภารกิจท้าทาย', teacher: 'ชุดกิจกรรมครู', race: 'แข่งจับเวลา',
 };
 
 export type Challenge = 'rounds' | 'hints' | 'different' | 'routes';

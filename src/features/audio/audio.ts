@@ -1,4 +1,5 @@
 import type { Preferences } from '../settings/settings';
+import { musicTempo, scoreStep, type MusicScene } from './soundtrack';
 
 const notes = {
   ui_hover: [520], ui_click: [493, 740], tile_grab: [392, 587], tile_drop: [330, 493],
@@ -12,8 +13,24 @@ let master: GainNode | undefined;
 let musicGain: GainNode | undefined;
 let effectsGain: GainNode | undefined;
 let audioTimer: number | undefined;
-let musicIndex = 0;
 let musicEnabled = false;
+let scene: MusicScene = 'waiting';
+let sceneGain: GainNode | undefined;
+let scorePosition = 0;
+let nextBeat = 0;
+
+export function setMusicScene(next: MusicScene) {
+  if (scene === next) return;
+  scene = next;
+  nextBeat = 0;
+  scorePosition = 0;
+  if (sceneGain && context) {
+    const previous = sceneGain;
+    previous.gain.setTargetAtTime(0, context.currentTime, .075);
+    window.setTimeout(() => previous.disconnect(), 350);
+    sceneGain = undefined;
+  }
+}
 
 export function setAudio(preferences: Preferences, allowed: boolean) {
   musicEnabled = allowed && !preferences.mute && preferences.master > 0 && preferences.music > 0;
@@ -37,11 +54,7 @@ export function unlockAudio(preferences: Preferences, allowed: boolean) {
     if (context.state === 'suspended') void context.resume().catch(() => {});
     setAudio(preferences, allowed);
     if (audioTimer === undefined) {
-      audioTimer = window.setInterval(() => {
-        if (!musicEnabled || !musicGain || document.hidden) return;
-        const chords = [[130.81, 196, 261.63], [110, 164.81, 220], [87.31, 130.81, 174.61], [98, 146.83, 196]];
-        chords[musicIndex++ % chords.length].forEach((frequency, index) => tone(frequency, index * .42, 3.4, musicGain!, .13, 'sine', .65));
-      }, 3850);
+      audioTimer = window.setInterval(scheduleMusic, 80);
     }
   } catch { /* The visual state remains usable if audio is unavailable. */ }
 }
@@ -60,6 +73,57 @@ function tone(frequency: number, offset: number, duration: number, output: GainN
   oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); };
   oscillator.start(start);
   oscillator.stop(start + duration + .02);
+}
+
+function drum(output: GainNode, offset: number, low: boolean, strength: number) {
+  if (!context) return;
+  const start = context.currentTime + offset;
+  const oscillator = context.createOscillator();
+  const envelope = context.createGain();
+  const duration = low ? .21 : .12;
+  oscillator.type = low ? 'sine' : 'triangle';
+  oscillator.frequency.setValueAtTime(low ? 154 : 465, start);
+  oscillator.frequency.exponentialRampToValueAtTime(low ? 69 : 255, start + duration);
+  envelope.gain.setValueAtTime(.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(.28 * strength, start + .009);
+  envelope.gain.exponentialRampToValueAtTime(.0001, start + duration);
+  oscillator.connect(envelope).connect(output);
+  oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); };
+  oscillator.start(start);
+  oscillator.stop(start + duration);
+}
+
+function scheduleMusic() {
+  if (!context || !musicGain || context.state !== 'running' || !musicEnabled || document.hidden) {
+    nextBeat = 0;
+    return;
+  }
+  if (!sceneGain) {
+    sceneGain = context.createGain();
+    sceneGain.connect(musicGain);
+    sceneGain.gain.setValueAtTime(.001, context.currentTime);
+    sceneGain.gain.setTargetAtTime(1, context.currentTime, .09);
+  }
+  const output = sceneGain;
+  const now = context.currentTime;
+  if (nextBeat < now) nextBeat = now + .02;
+  const tick = 30 / musicTempo[scene];
+  const frequency = (note: number) => 440 * 2 ** ((note - 69) / 12);
+  while (nextBeat < now + .16) {
+    const offset = nextBeat - now;
+    scoreStep(scene, scorePosition++, {
+      string(note, beats, strength) {
+        const base = frequency(note);
+        tone(base, offset, tick * beats, output, .16 * strength, 'triangle', .008);
+        tone(base * 2.005, offset, tick * beats * .56, output, .046 * strength, 'sine', .012);
+      },
+      sustained(note, beats, strength) {
+        tone(frequency(note), offset, tick * beats, output, .15 * strength, 'sine', .085);
+      },
+      drum(low, strength) { drum(output, offset, low, strength); },
+    });
+    nextBeat += tick;
+  }
 }
 
 export function sound(effect: keyof typeof notes) {

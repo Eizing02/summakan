@@ -12,7 +12,7 @@ export function SettingsPanel({ value, onChange, close, camera }: { value: Prefe
         <option value="auto">อัตโนมัติ</option><option value="low">ต่ำ</option><option value="medium">กลาง</option><option value="high">สูง</option><option value="2d">ตาชั่ง 2 มิติ</option>
       </select></label>
       <label>การประมวลผลกล้อง<select value={value.delegate} onChange={e => onChange({ ...value, delegate: e.target.value === 'CPU' ? 'CPU' : 'GPU' })}>
-        <option value="GPU">ลอง GPU ก่อน</option><option value="CPU">เลือก CPU</option>
+        <option value="CPU">CPU (แนะนำ)</option><option value="GPU">ลอง GPU ก่อน</option>
       </select></label>
       <label className="check-label"><input type="checkbox" checked={value.reduced} onChange={e => onChange({ ...value, reduced: e.target.checked })}/> ลดการเคลื่อนไหว</label>
       <label className="check-label"><input type="checkbox" checked={value.mute} onChange={e => onChange({ ...value, mute: e.target.checked })}/> ปิดเสียงทั้งหมด</label>

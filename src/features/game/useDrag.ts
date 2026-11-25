@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type { Point, GestureFrame } from '../../core/input/gesture-machine';
 import type { Side } from '../../core/mathematics/linear-expression';
 import { sound } from '../audio/audio';
@@ -38,14 +38,15 @@ function handTile(element: Element | null, point: Point) {
 function handPosition(surface: HTMLElement, point: Point): Point | null {
   const board = surface.getBoundingClientRect();
   const lab = surface.querySelector('.lab')?.getBoundingClientRect();
-  const digits = surface.querySelector('.digits')?.getBoundingClientRect();
-  const lastTile = surface.querySelector('.digits')?.lastElementChild?.getBoundingClientRect();
-  if (!lab || !digits || !lastTile) return null;
-  const inset = Math.min(16, lastTile.width * .25);
-  const left = Math.max(0, board.left, digits.left + inset);
-  const right = Math.min(window.innerWidth - 1, board.right - 1, digits.right - inset);
+  const first = surface.querySelector('.digits .inventory-tile:first-child')?.getBoundingClientRect();
+  const lastDigit = surface.querySelector('.digits .inventory-tile:last-child')?.getBoundingClientRect();
+  const lastOperator = surface.querySelector('.operators .inventory-tile:last-child')?.getBoundingClientRect();
+  if (!lab || !first || !lastDigit || !lastOperator) return null;
+  const left = Math.max(0, board.left, first.left + Math.min(16, first.width * .25));
+  const right = Math.min(window.innerWidth - 1, board.right - 1, lastOperator.right - Math.min(16, lastOperator.width * .25));
   const top = Math.max(0, board.top, lab.top + 8);
-  const bottom = Math.min(window.innerHeight - 1, board.bottom - 1, lastTile.bottom - lastTile.height * .24);
+  const bottom = Math.min(window.innerHeight - 1, board.bottom - 1,
+    lastDigit.bottom - lastDigit.height * .24, lastOperator.bottom - lastOperator.height * .24);
   if (right < left || bottom < top) return null;
   return { x: left + point.x * (right - left), y: top + point.y * (bottom - top) };
 }
@@ -80,10 +81,26 @@ export function useDrag(
   context.current = { state, dispatch, enabled };
 
   function moveGhost(point: Point) {
-    ghost.current?.style.setProperty('--ghost-x', point.x + 'px');
-    ghost.current?.style.setProperty('--ghost-y', point.y + 'px');
+    const node = ghost.current;
+    if (!node || !surface.current) return;
+    const width = node.offsetWidth, height = node.offsetHeight;
+    const maxX = Math.max(6, document.documentElement.clientWidth - width - 6);
+    const maxY = Math.max(6, window.innerHeight - height - 6);
+    const protectedAreas = Array.from(surface.current.querySelectorAll('.equation-plaque, .pan-math, .drop-slot'),
+      element => element.getBoundingClientRect());
+    const candidates = [
+      { x: point.x + 18, y: point.y - height - 10 }, { x: point.x - width - 18, y: point.y - height - 10 },
+      { x: point.x + 23, y: point.y - height / 2 }, { x: point.x - width - 23, y: point.y - height / 2 },
+      { x: point.x + 17, y: point.y + 16 }, { x: point.x - width - 17, y: point.y + 16 },
+    ].map(({ x, y }) => ({ x: Math.min(maxX, Math.max(6, x)), y: Math.min(maxY, Math.max(6, y)) }));
+    const clear = candidates.find(({ x, y }) => protectedAreas.every(rect =>
+      x + width + 6 <= rect.left || x - 6 >= rect.right || y + height + 6 <= rect.top || y - 6 >= rect.bottom));
+    const position = clear ?? candidates[0];
+    node.dataset.clear = String(Boolean(clear));
+    node.style.setProperty('--ghost-x', position.x + 'px');
+    node.style.setProperty('--ghost-y', position.y + 'px');
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!drawing) return;
     if (held.current) moveGhost(held.current.point);
   }, [drawing]);
@@ -184,15 +201,18 @@ export function useDrag(
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && held.current) finish({ inventory: false });
     };
+    const resize = () => { if (held.current) moveGhost(held.current.point); };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', cancel);
     window.addEventListener('keydown', key);
+    window.addEventListener('resize', resize);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', cancel);
       window.removeEventListener('keydown', key);
+      window.removeEventListener('resize', resize);
       window.clearTimeout(returnTimer.current);
       window.clearTimeout(pulseTimer.current);
     };
@@ -216,17 +236,26 @@ export function useDrag(
     start(source, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, null, false);
   }
 
+  function aimedTile(position: Point, hit: Element | null) {
+    if (held.current) return null;
+    const previous = hover.current;
+    if (previous?.isConnected && previous.matches('[data-tile]:not(:disabled)') && distanceToTile(position, previous) <= 5) return previous;
+    return handTile(hit, position);
+  }
+
+  function canHandGrab(point: Point) {
+    const position = enabled && surface.current && handPosition(surface.current, point);
+    return Boolean(position && aimedTile(position, document.elementFromPoint(position.x, position.y)));
+  }
+
   function handFrame(frame: GestureFrame) {
-    if (!surface.current || !enabled) return false;
+    if (!surface.current || !enabled) return;
     const position = frame.point && handPosition(surface.current, frame.point);
     if (frame.event === 'cancel' && held.current?.hand) {
       finish({ inventory: false }, frame.state === 'TRACKING_LOST');
     }
     const hit = position ? document.elementFromPoint(position.x, position.y) : null;
-    const previousTile = hover.current?.matches('[data-tile]:not(:disabled)') && hover.current.isConnected ? hover.current : null;
-    const tile = position && !held.current
-      ? previousTile && distanceToTile(position, previousTile) <= 5 ? previousTile : handTile(hit, position)
-      : null;
+    const tile = position ? aimedTile(position, hit) : null;
     const element = tile ?? hit?.closest<HTMLElement>('[data-drop-side]') ?? null;
     if (hover.current !== element) {
       hover.current?.classList.remove('hand-hover');
@@ -236,7 +265,7 @@ export function useDrag(
     }
     if (frame.state === 'PINCH_START' && pinchTile.current === undefined) pinchTile.current = tile;
     else if (frame.state !== 'PINCH_START' && frame.event !== 'grab') pinchTile.current = undefined;
-    if (!position || frame.state === 'TRACKING_LOST') { cursor.current?.fade(); return false; }
+    if (!position || frame.state === 'TRACKING_LOST') { cursor.current?.fade(); return; }
     if (frame.event === 'grab') {
       const aimed = pinchTile.current;
       const source = aimed && aimed.isConnected && aimed.matches('[data-tile]:not(:disabled)') && distanceToTile(position, aimed) <= 15
@@ -256,8 +285,7 @@ export function useDrag(
       if (frame.event === 'drop') finish(target);
     }
     cursor.current?.show(frame, position, Boolean(held.current?.hand), Boolean(element));
-    return Boolean(element);
   }
 
-  return { drawing, ghost, cursor, selection, overSide, impact, pointerDown, keyboardPick, finish, handFrame };
+  return { drawing, ghost, cursor, selection, overSide, impact, pointerDown, keyboardPick, finish, handFrame, canHandGrab };
 }

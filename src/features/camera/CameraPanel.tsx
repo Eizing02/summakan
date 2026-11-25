@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Camera, Check, Crosshair, Hand, Mouse, X } from 'lucide-react';
 import { HandTracker, type CameraHelp } from '../../core/input/hand-tracker';
-import { GestureMachine, validHandRange, type Calibration, type GestureFrame, type HandRange, type Point } from '../../core/input/gesture-machine';
+import { GestureMachine, validHandRange, type Calibration, type GameHandInput, type HandRange, type Point } from '../../core/input/gesture-machine';
 import type { Preferences } from '../settings/settings';
 
 const connections = [[0,1,2,3,4], [0,5,6,7,8], [5,9,10,11,12], [9,13,14,15,16], [13,17,18,19,20], [0,17]];
@@ -19,15 +19,17 @@ export interface CameraControl {
 
 interface CameraPanelProps {
   open: boolean;
+  required: boolean;
   control: RefObject<CameraControl | null>;
   preferences: Preferences;
   onCalibration: (settings: Calibration) => void;
   onClose: () => void;
+  onUse: () => void;
   onStatus: (status: string, running: boolean) => void;
-  gameFrame: RefObject<((frame: GestureFrame) => boolean) | null>;
+  gameFrame: RefObject<GameHandInput | null>;
 }
 
-export function CameraPanel({ open, control, preferences, onCalibration, onClose, onStatus, gameFrame }: CameraPanelProps) {
+export function CameraPanel({ open, required, control, preferences, onCalibration, onClose, onUse, onStatus, gameFrame }: CameraPanelProps) {
   const video = useRef<HTMLVideoElement>(null);
   const overlay = useRef<SVGSVGElement>(null);
   const statusLine = useRef<HTMLParagraphElement>(null);
@@ -35,7 +37,6 @@ export function CameraPanel({ open, control, preferences, onCalibration, onClose
   const dialog = useRef<HTMLDialogElement>(null);
   const tracker = useRef(new HandTracker());
   const machine = useRef(new GestureMachine());
-  const hovering = useRef(false);
   const [status, setStatus] = useState('กล้องยังปิดอยู่');
   const [help, setHelp] = useState<CameraHelp>();
   const [running, setRunning] = useState(false);
@@ -60,12 +61,11 @@ export function CameraPanel({ open, control, preferences, onCalibration, onClose
   function stop() {
     tracker.current.stop();
     machine.current = new GestureMachine();
-    hovering.current = false;
     samples.current = [];
     setCapture(null);
     setPractice(null);
     setNote('');
-    gameFrame.current?.({ point: null, event: 'cancel', state: 'NO_HAND' });
+    gameFrame.current?.handleFrame({ point: null, event: 'cancel', state: 'NO_HAND' });
     setRunning(false);
     setLoading(false);
     setStatus('กล้องยังปิดอยู่');
@@ -79,11 +79,20 @@ export function CameraPanel({ open, control, preferences, onCalibration, onClose
     return () => { camera.stop(); control.current = null; };
   }, [control]);
 
-  function onFrame(hands: Parameters<GestureMachine['frame']>[0], timestamp: number, aspect: number) {
-    const frame = machine.current.frame(hands, timestamp, aspect, settings.current.calibration, hovering.current);
+  function onFrame(hands: Parameters<GestureMachine['frame']>[0], timestamp: number, aspect: number, reset = false) {
+    const current = settings.current;
+    if (reset) {
+      machine.current = new GestureMachine();
+      if (current.practice === 'grabbed') setPractice('ready');
+      gameFrame.current?.handleFrame({ point: null, event: 'cancel', state: 'TRACKING_LOST' });
+    }
+    const frame = machine.current.frame(hands, timestamp, aspect, current.calibration, point =>
+      current.open
+        ? current.practice === 'ready' && Math.hypot(point.x - .5, point.y - .5) < .18
+        : gameFrame.current?.canGrab(point) ?? false);
     if (!frame) return;
     if (!settings.current.open) {
-      hovering.current = gameFrame.current?.(frame) ?? false;
+      gameFrame.current?.handleFrame(frame);
       if (timestamp - lastUpdate.current >= 280) {
         lastUpdate.current = timestamp;
         onStatus(frame.hand ? 'พบมือ · ' + Math.round(frame.hand.confidence * 100) + '%' : 'กำลังมองหามือ', true);
@@ -131,7 +140,11 @@ export function CameraPanel({ open, control, preferences, onCalibration, onClose
       setRunning(active);
       setLoading(!active && message.startsWith('กำลัง'));
       onStatus(message, active);
-      if (!active) gameFrame.current?.({ point: null, event: 'cancel', state: 'TRACKING_LOST' });
+      if (!active) {
+        machine.current = new GestureMachine();
+        setPractice(value => value === 'grabbed' ? 'ready' : value);
+        gameFrame.current?.handleFrame({ point: null, event: 'cancel', state: 'TRACKING_LOST' });
+      }
     }, preferences.delegate);
   }
 
@@ -178,7 +191,8 @@ export function CameraPanel({ open, control, preferences, onCalibration, onClose
     onCancel={event => { event.preventDefault(); close(); }}>
     <header className="dialog-header"><h2><Camera size={24}/> ตั้งค่ากล้อง</h2><button type="button" className="icon-button" aria-label="ปิด" onClick={close}><X size={21}/></button></header>
     <div className="dialog-body">
-      <p>อนุญาตให้ใช้กล้องเพื่อใช้นิ้วชี้เลื่อนเคอร์เซอร์และหนีบนิ้วเพื่อหยิบวัตถุ ภาพจะประมวลผลบนอุปกรณ์นี้</p>
+      <p>{required ? 'ก่อนเล่นครั้งแรก ให้เปิดกล้องแล้วกดใช้กล้องเพื่อเข้าเกม ภาพจะประมวลผลบนอุปกรณ์นี้' :
+        'อนุญาตให้ใช้กล้องเพื่อใช้นิ้วชี้เลื่อนเคอร์เซอร์และหนีบนิ้วเพื่อหยิบวัตถุ ภาพจะประมวลผลบนอุปกรณ์นี้'}</p>
       <div className="camera-grid">
         <div className="camera-column">
           <div className="camera-preview">
@@ -225,8 +239,8 @@ export function CameraPanel({ open, control, preferences, onCalibration, onClose
         <Check size={18}/> บันทึกช่วงมือแล้ว {practice === 'done' ? '· ทดลองหยิบและปล่อยสำเร็จ' : practice === 'grabbed' ? '· ลองคลายนิ้วเพื่อปล่อย' : '· ลองเลื่อนเป้าไปที่วงกลางแล้วหนีบและคลายนิ้ว'}
       </p>}
       <div className="button-row">
-        {running ? <button type="button" className="primary" onClick={onClose}><Check size={18}/> ใช้กล้อง</button> : <button type="button" className="primary" ref={focusButton} disabled={loading} onClick={enable}><Camera size={18}/> เปิดกล้อง</button>}
-        <button type="button" className="secondary" onClick={chooseMouse}><Mouse size={18}/> ใช้เมาส์</button>
+        {running ? <button type="button" className="primary" onClick={onUse}><Check size={18}/> ใช้กล้อง</button> : <button type="button" className="primary" ref={focusButton} disabled={loading} onClick={enable}><Camera size={18}/> เปิดกล้อง</button>}
+        {!required && <button type="button" className="secondary" onClick={chooseMouse}><Mouse size={18}/> ใช้เมาส์</button>}
       </div>
     </div>
   </dialog>;

@@ -12,6 +12,7 @@ const page = await browser.newPage({ viewport });
 
 await page.addInitScript(() => {
   localStorage.setItem('balance-quest-preferences', JSON.stringify({ quality: 'medium', reduced: false, mute: true }));
+  localStorage.setItem('balance-quest-first-camera', 'true');
   const StandardWorker = window.Worker;
   window.__benchmarkFrames = 0;
   window.Worker = class extends StandardWorker {

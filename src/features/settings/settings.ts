@@ -47,7 +47,7 @@ export function initialPreferences(): Preferences {
   const saved = readLocal<Partial<Preferences>>('balance-quest-preferences', {});
   return {
     quality: 'auto', reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, master: .6,
-    music: .14, sfx: .65, mute: false, tilt: 5, settle: 760, delegate: 'GPU',
+    music: .14, sfx: .65, mute: false, tilt: 5, settle: 760, delegate: 'CPU',
     ...saved, calibration: { ...defaultCalibration, ...saved.calibration },
   };
 }

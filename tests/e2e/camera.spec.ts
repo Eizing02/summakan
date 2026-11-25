@@ -1,16 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
 
 type TestPose = { x: number; y: number; pinched: boolean; step: number };
-type CameraTestWindow = Window & { testStream?: MediaStream; testCameraStarts?: number; testPose?: TestPose | null };
+type CameraTestWindow = Window & { testStream?: MediaStream; testCameraStarts?: number; testPose?: TestPose | null; testWorker?: Worker };
 
-async function withSyntheticCamera(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem('balance-quest-preferences', JSON.stringify({ quality: '2d', reduced: true, mute: true, calibration: { cursorGain: 1 } }));
+async function withSyntheticCamera(page: Page, delegate: 'GPU' | 'CPU' = 'CPU', width = 320, mute = true) {
+  await page.addInitScript(({ delegate, width, mute }) => {
+    localStorage.setItem('balance-quest-preferences', JSON.stringify({ quality: '2d', reduced: true, mute, delegate, calibration: { cursorGain: 1 } }));
     const StandardWorker = Worker;
     class ObservedWorker extends StandardWorker {
       constructor(url: string | URL, options?: WorkerOptions) {
         super(url, options);
+        (window as CameraTestWindow).testWorker = this;
         this.addEventListener('message', event => {
+          if (event.data.type === 'test-delay') document.documentElement.dataset.testDelay = 'true';
+          if (event.data.type === 'test-frame-size') document.documentElement.dataset.testFrameSize = event.data.size;
           if (event.data.type !== 'frame') return;
           document.documentElement.dataset.inference = String(event.data.timestamp);
           const pose = (window as CameraTestWindow).testPose;
@@ -33,32 +36,46 @@ async function withSyntheticCamera(page: Page) {
     window.Worker = ObservedWorker;
     navigator.mediaDevices.getUserMedia = async () => {
       const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 240;
+      canvas.width = width;
+      canvas.height = width * .75;
       const ctx = canvas.getContext('2d')!;
       const stream = canvas.captureStream(25);
       let counter = 0;
       const timer = setInterval(() => {
         if (stream.getTracks()[0].readyState === 'ended') return clearInterval(timer);
         ctx.fillStyle = counter++ % 2 ? '#283343' : '#283344';
-        ctx.fillRect(0, 0, 320, 240);
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
       }, 40);
       const testWindow = window as CameraTestWindow;
       testWindow.testStream = stream;
       testWindow.testCameraStarts = (testWindow.testCameraStarts ?? 0) + 1;
       return stream;
     };
-  });
+  }, { delegate, width, mute });
 }
 
-async function mockInference(page: Page) {
+async function mockInference(page: Page, stallGpu = false) {
   await page.route('**/mediapipe/hand-worker.js', route => route.fulfill({
     contentType: 'text/javascript',
-    body: `self.onmessage = ({ data }) => {
-      if (data.type === 'init') self.postMessage({ type: 'ready', delegate: data.preference });
-      else {
+    body: `let delegate, nextDelay = 0, reported = false;
+    self.onmessage = ({ data }) => {
+      if (data.type === 'init') {
+        delegate = data.preference;
+        self.postMessage({ type: 'ready', delegate });
+      } else if (data.type === 'test-hold') nextDelay = data.delay;
+      else if (data.type === 'frame') {
+        if (!reported && delegate === 'CPU') {
+          self.postMessage({ type: 'test-frame-size', size: data.bitmap.width + 'x' + data.bitmap.height });
+          reported = true;
+        }
         data.bitmap.close();
-        self.postMessage({ type: 'frame', result: { landmarks: [], handedness: [] }, timestamp: data.timestamp });
+        if (${stallGpu} && delegate === 'GPU') return;
+        const complete = () => self.postMessage({ type: 'frame', result: { landmarks: [], handedness: [] }, timestamp: data.timestamp });
+        if (nextDelay) {
+          self.postMessage({ type: 'test-delay' });
+          setTimeout(complete, nextDelay);
+          nextDelay = 0;
+        } else complete();
       }
     };`,
   }));
@@ -72,23 +89,50 @@ function moveSyntheticHand(page: Page) {
   };
 }
 
-test('permission denial keeps mouse mode available', async ({ page }) => {
+test('first play waits for camera consent and cannot continue after denial', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => { throw new DOMException('Denied for test', 'NotAllowedError'); } });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'ตั้งค่ากล้อง' }).click();
+  await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).click();
   await page.getByRole('button', { name: 'เปิดกล้อง', exact: true }).click();
   await expect(page.getByText('เบราว์เซอร์ยังไม่อนุญาตให้ใช้กล้อง', { exact: false })).toBeVisible();
   await expect(page.getByText(/เปิดใน Chrome หรือ Edge โดยตรง/)).toBeVisible();
-  await page.getByRole('button', { name: 'ใช้เมาส์', exact: true }).click();
-  await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).click();
+  await expect(page.getByRole('button', { name: 'ใช้เมาส์', exact: true })).toHaveCount(0);
+  await expect(page.locator('.inventory')).toHaveCount(0);
+  await page.getByRole('dialog').getByRole('button', { name: 'ปิด', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'เริ่มเรียนรู้' })).toBeVisible();
+});
+
+test('first race starts the soundtrack on interaction and waits for the camera before the countdown', async ({ page }) => {
+  await withSyntheticCamera(page, 'CPU', 320, false);
+  await mockInference(page);
+  await page.addInitScript(() => {
+    const createOscillator = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function () {
+      document.documentElement.dataset.musicStarted = 'true';
+      return createOscillator.call(this);
+    };
+  });
+  await page.goto('/');
+  const root = page.locator('html');
+  await expect(root).not.toHaveAttribute('data-music-started', 'true');
+  await page.getByRole('button', { name: 'แข่งจับเวลา' }).click();
+  await expect(root).toHaveAttribute('data-music-started', 'true');
+  await page.getByRole('button', { name: 'เริ่มแข่ง' }).click();
+  await expect(page.getByRole('timer')).toHaveCount(0);
+  const camera = page.getByRole('dialog', { name: 'ตั้งค่ากล้อง' });
+  await expect(camera.getByText(/ก่อนเล่นครั้งแรก/)).toBeVisible();
+  await camera.getByRole('button', { name: 'เปิดกล้อง', exact: true }).click();
+  await camera.getByRole('button', { name: 'ใช้กล้อง', exact: true }).click();
+  await expect(page.getByRole('timer')).toHaveText('05:00');
   await expect(page.locator('.inventory')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('balance-quest-first-camera'))).toBe('true');
 });
 
 test('local MediaPipe GPU processes a synthetic stream and handles track disconnection', async ({ page }) => {
   test.setTimeout(75000);
-  await withSyntheticCamera(page);
+  await withSyntheticCamera(page, 'GPU');
   await page.goto('/');
   await page.getByRole('button', { name: 'ตั้งค่ากล้อง' }).click();
   await page.getByRole('button', { name: 'เปิดกล้อง', exact: true }).click();
@@ -106,7 +150,8 @@ test('local MediaPipe GPU processes a synthetic stream and handles track disconn
 
 test('GPU initialization failure falls back to CPU and processes synthetic video frames', async ({ page }) => {
   test.setTimeout(60000);
-  await withSyntheticCamera(page);
+  await withSyntheticCamera(page, 'GPU');
+  await page.addInitScript(() => localStorage.setItem('balance-quest-first-camera', 'true'));
   await page.route('**/mediapipe/hand-worker.js', async route => {
     const response = await route.fetch();
     const script = (await response.text()).replace('async function setup(delegate) {',
@@ -126,6 +171,19 @@ test('GPU initialization failure falls back to CPU and processes synthetic video
   await expect(camera).toBeHidden();
   await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).click();
   await expect(page.locator('.vector-scale')).toBeVisible();
+});
+
+test('a stalled GPU detector switches to a CPU Worker and downsizes frames without reopening the camera', async ({ page }) => {
+  await withSyntheticCamera(page, 'GPU', 640);
+  await mockInference(page, true);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ตั้งค่ากล้อง', exact: true }).click();
+  const camera = page.getByRole('dialog', { name: 'ตั้งค่ากล้อง' });
+  await camera.getByRole('button', { name: 'เปิดกล้อง', exact: true }).click();
+  await expect(camera.getByText('เปิด GPU ไม่สำเร็จ ใช้ CPU แทน · Worker', { exact: true })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-inference', /\d/);
+  await expect(page.locator('html')).toHaveAttribute('data-test-frame-size', '384x288');
+  expect(await page.evaluate(() => (window as CameraTestWindow).testCameraStarts)).toBe(1);
 });
 
 test('camera stays on after solving, can restart on results, and continues into the next question', async ({ page }) => {
@@ -154,9 +212,9 @@ test('camera stays on after solving, can restart on results, and continues into 
     await page.locator('.inventory-tile[data-tile="3"]').click();
     await slot.click();
   }
-  const verify = page.getByRole('dialog', { name: 'แทนค่าตรวจคำตอบ' });
-  await verify.getByLabel('ค่า x').fill('5');
-  await verify.getByRole('button', { name: 'ตรวจคำตอบ' }).click();
+  const correct = page.getByRole('dialog', { name: 'ถูกต้อง!' });
+  await expect(correct.locator('.answer-value annotation')).toHaveText('x = 5');
+  await correct.getByRole('button', { name: 'ดูผลและวิธีทำ' }).click();
   await expect(page.getByRole('heading', { name: 'ผ่านภารกิจ' })).toBeVisible();
   expect(await stream()).toEqual({ starts: 1, track: 'live' });
   await page.getByRole('button', { name: 'ปิดกล้อง' }).click();
@@ -231,11 +289,22 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   const tile = (await digit.boundingBox())!;
   const move = moveSyntheticHand(page);
   const lab = (await page.locator('.lab').boundingBox())!;
-  const digits = (await page.locator('.digits').boundingBox())!;
+  const first = (await page.locator('.digits .inventory-tile').first().boundingBox())!;
+  const rowOneEnd = (await page.locator('.digits .inventory-tile').nth(4).boundingBox())!;
+  const rowTwoStart = (await page.locator('.digits .inventory-tile').nth(5).boundingBox())!;
   const last = (await page.locator('.digits .inventory-tile').last().boundingBox())!;
-  const inset = Math.min(16, last.width * .25);
-  const left = digits.x + inset, right = digits.x + digits.width - inset;
-  const top = lab.y + 8, bottom = last.y + last.height * .76;
+  const firstOp = (await page.locator('.operators .inventory-tile').first().boundingBox())!;
+  const lastOp = (await page.locator('.operators .inventory-tile').last().boundingBox())!;
+  expect(first.y).toBe(rowOneEnd.y);
+  expect(first.x).toBe(rowTwoStart.x);
+  expect(rowTwoStart.y).toBeGreaterThan(first.y);
+  expect(firstOp.x).toBeGreaterThan(rowOneEnd.x + rowOneEnd.width);
+  expect(firstOp.y).toBe(first.y);
+  expect(lastOp.y).toBe(last.y);
+  expect(first.y).toBeGreaterThanOrEqual(lab.y + lab.height);
+  const left = first.x + Math.min(16, first.width * .25);
+  const right = lastOp.x + lastOp.width - Math.min(16, lastOp.width * .25);
+  const top = lab.y + 8, bottom = Math.min(last.y + last.height * .76, lastOp.y + lastOp.height * .76);
   const setPose = async (x: number, y: number, pinched: boolean) => {
     await move(.175 + .65 * (x - left) / (right - left), .175 + .65 * (y - top) / (bottom - top), pinched);
   };
@@ -254,6 +323,11 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   await expect(cursor).toHaveAttribute('data-mode', 'holding');
   await expect(ring).toHaveCSS('border-top-color', 'rgb(255, 211, 108)');
   await expect(fingers).not.toHaveAttribute('d', openPose!);
+  await page.evaluate(() => (window as CameraTestWindow).testWorker?.postMessage({ type: 'test-hold', delay: 700 }));
+  await expect(page.locator('html')).toHaveAttribute('data-test-delay', 'true');
+  const beforeDelay = await page.locator('html').getAttribute('data-inference');
+  await expect(page.locator('html')).not.toHaveAttribute('data-inference', beforeDelay!);
+  await expect(cursor).toHaveAttribute('data-mode', 'holding');
   const bounds = (await region.boundingBox())!;
   const x = left + 12, y = bounds.y + bounds.height * .66;
   for (let progress = .1; progress <= 1.01; progress += .1) {
@@ -266,10 +340,14 @@ test('compact desktop hand input reaches the tile tray, shows a translucent grip
   await expect(cursor).toHaveAttribute('data-mode', 'aim');
   await expect(ring).toHaveCSS('border-top-color', 'rgb(158, 220, 255)');
   await setPose(x, y, true);
-  await expect(cursor).toHaveAttribute('data-pose', 'DRAGGING');
+  await expect(cursor).toHaveAttribute('data-pose', 'POINTING');
   await expect(cursor).toHaveAttribute('data-mode', 'aim');
   await expect(region).toHaveCount(0);
   await page.evaluate(() => { (window as CameraTestWindow).testPose = null; });
   await expect(cursor).toHaveAttribute('data-mode', 'lost');
   await expect(cursor).toHaveCSS('opacity', '0');
+  await setPose(lastOp.x + lastOp.width / 2, lastOp.y + lastOp.height / 2, false);
+  await expect(page.locator('.operators .inventory-tile').last()).toHaveClass(/hand-hover/);
+  await setPose(lastOp.x + lastOp.width / 2, lastOp.y + lastOp.height / 2, true);
+  await expect(cursor).toHaveAttribute('data-mode', 'holding');
 });

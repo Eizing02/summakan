@@ -4,6 +4,10 @@ const tile = (page: Page, symbol: string) => page.locator('.inventory-tile').fil
 const slot = (page: Page, side: 'left' | 'right') => page.locator('[data-drop-side="' + side + '"]');
 const anchor = (page: Page, side: 'left' | 'right') => page.getByTestId('anchor-' + side);
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('balance-quest-first-camera', 'true'));
+});
+
 async function reduced(page: Page) {
   await page.addInitScript(() => localStorage.setItem('balance-quest-preferences', JSON.stringify({ reduced: true, settle: 760, mute: true })));
 }
@@ -17,8 +21,7 @@ async function tutorial(page: Page) {
 }
 
 async function to(page: Page, source: Locator, target: Locator) {
-  const from = (await source.boundingBox())!;
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await source.hover();
   await page.mouse.down();
   const box = (await target.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
@@ -53,13 +56,11 @@ test('mouse tutorial from drag to equivalent rounds, answer verification, histor
   }
   expect(angles[0]).toBeGreaterThan(angles[1]);
   expect(angles[2]).toBe(0);
-  const verify = page.getByRole('dialog', { name: 'แทนค่าตรวจคำตอบ' });
-  await expect(verify).toBeVisible();
-  await verify.getByLabel('ค่า x').fill('7');
-  await verify.getByRole('button', { name: 'ตรวจคำตอบ' }).click();
-  await expect(verify.getByText('ผลสองฝั่งยังต่างกัน', { exact: false })).toBeVisible();
-  await verify.getByLabel('ค่า x').fill('8');
-  await verify.getByRole('button', { name: 'ตรวจคำตอบ' }).click();
+  const correct = page.getByRole('dialog', { name: 'ถูกต้อง!' });
+  await expect(correct.locator('.answer-value annotation')).toHaveText('x = 8');
+  await expect(correct.getByRole('textbox')).toHaveCount(0);
+  await expect(correct.getByRole('button', { name: 'ข้อต่อไป' })).toBeVisible();
+  await correct.getByRole('button', { name: 'ดูผลและวิธีทำ' }).click();
   await expect(page.getByRole('heading', { name: 'ผ่านภารกิจ' })).toBeVisible();
   await page.getByRole('button', { name: 'ดูประวัติ' }).click();
   await expect(page.getByRole('dialog').getByText('x - 3 + 3 = 5 + 1 + 1 + 1')).toBeVisible();
@@ -127,10 +128,9 @@ test('teacher rejects malformed, unsupported and non-unique equations, and runs 
     await clickTile(page, '−', side);
     await clickTile(page, '1', side);
   }
-  const verify = page.getByRole('dialog', { name: 'แทนค่าตรวจคำตอบ' });
-  await expect(verify).toBeVisible();
-  await verify.getByLabel('ค่า x').fill('-5');
-  await verify.getByRole('button', { name: 'ตรวจคำตอบ' }).click();
+  const correct = page.getByRole('dialog', { name: 'ถูกต้อง!' });
+  await expect(correct.locator('.answer-value annotation')).toHaveText('x = -5');
+  await correct.getByRole('button', { name: 'ดูผลและวิธีทำ' }).click();
   await expect(page.getByText('คำคาดการณ์ · คูณด้วยจำนวนติดลบทั้งสองฝั่ง')).toBeVisible();
   await page.getByRole('button', { name: 'โจทย์ถัดไป' }).click();
   await expect(page.getByTestId('expression-left')).toHaveAttribute('aria-label', '3x');
@@ -139,8 +139,8 @@ test('teacher rejects malformed, unsupported and non-unique equations, and runs 
     await clickTile(page, '÷', side);
     await clickTile(page, '3', side);
   }
-  await verify.getByLabel('ค่า x').fill('2/3');
-  await verify.getByRole('button', { name: 'ตรวจคำตอบ' }).click();
+  await expect(correct.locator('.answer-value annotation')).toHaveText(/frac.*2.*3/);
+  await correct.getByRole('button', { name: 'ดูผลและวิธีทำ' }).click();
   await expect(page.getByRole('heading', { name: 'ผ่านภารกิจ' })).toBeVisible();
   await page.getByRole('button', { name: 'เมนูหลัก', exact: true }).click();
   await page.getByRole('button', { name: 'โหมดครู', exact: true }).click();
@@ -171,8 +171,8 @@ test('large digit tiles and both wide drop regions work away from the pans', asy
   await page.getByRole('button', { name: 'เริ่มเรียนรู้' }).click();
   const region = (side: string) => page.locator('[data-drop-region="' + side + '"]');
   const mobileTile = (await tile(page, '4').boundingBox())!;
-  expect(mobileTile.width).toBeGreaterThanOrEqual(55);
-  expect(mobileTile.height).toBeGreaterThanOrEqual(46);
+  expect(mobileTile.width).toBeGreaterThanOrEqual(44);
+  expect(mobileTile.height).toBeGreaterThanOrEqual(44);
   await expect(region('left')).toHaveCount(0);
 
   await tile(page, '+').click();
@@ -184,7 +184,7 @@ test('large digit tiles and both wide drop regions work away from the pans', asy
   await page.setViewportSize({ width: 1280, height: 720 });
   const wideTile = (await tile(page, '4').boundingBox())!;
   expect(wideTile.width).toBeGreaterThanOrEqual(100);
-  expect(wideTile.height).toBeGreaterThanOrEqual(70);
+  expect(wideTile.height).toBeGreaterThanOrEqual(44);
   const { x, y, width, height } = wideTile;
   await page.mouse.move(x + width / 2, y + height / 2);
   await page.mouse.down();

@@ -60,17 +60,40 @@ export function generateQuestion(level: number, seed: number, id = `${level}-${s
   return question;
 }
 
-export const questionBank = levels.flatMap((_, index) => Array.from({ length: 10 }, (_, item) => generateQuestion(index + 1, item * 17 + index)));
+const questionsPerLevel = 60;
+const bankByLevel = levels.map((_, index) => {
+  const level = index + 1;
+  const questions = new Map<string, Question>();
+  const add = (seed: number) => {
+    const question = generateQuestion(level, seed);
+    const key = equationText(question.equation);
+    if (!questions.has(key)) questions.set(key, question);
+  };
+  for (let i = 0; i < 10; i++) add(i * 17 + index);
+  for (let i = 0; questions.size < questionsPerLevel && i < 936; i++) add((i * 53 + index * 97) % 936);
+  if (questions.size !== questionsPerLevel) throw new Error('จำนวนโจทย์ไม่ครบในระดับ ' + level);
+  return [...questions.values()];
+});
+export const questionBank = bankByLevel.flat();
 export const tutorialQuestion = makeQuestion('x − 3 = 5', 2, 'tutorial');
 export const firstLesson = makeQuestion('x + 3 = 8', 1, 'learning-1');
 
-export function randomQuestion(level: number, used: Set<string>, random = Math.random): Question | null {
-  const start = Math.floor(random() * 936);
-  for (let i = 0; i < 936; i += 1) {
-    const candidate = generateQuestion(level, (start + i) % 936);
-    if (!used.has(equationText(candidate.equation))) return candidate;
+export function questionsForLevel(level: number): readonly Question[] {
+  return bankByLevel[level - 1] ?? [];
+}
+
+export function randomQuestion(level: number, used: ReadonlySet<string>, random = Math.random): Question | null {
+  const available = questionsForLevel(level).filter(candidate => !used.has(equationText(candidate.equation)));
+  return available[Math.floor(random() * available.length)] ?? null;
+}
+
+export function shuffledQuestions(level: number, random = Math.random): Question[] {
+  const questions = [...questionsForLevel(level)];
+  for (let i = questions.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [questions[i], questions[j]] = [questions[j], questions[i]];
   }
-  return null;
+  return questions;
 }
 
 export function hintFor(question: Equation, pending: Parameters<typeof composeOperations>[0], right: Parameters<typeof composeOperations>[0]) {

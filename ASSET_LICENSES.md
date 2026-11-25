@@ -3,7 +3,7 @@
 | ชื่อ | ผู้สร้าง | ต้นทาง | สัญญาอนุญาตและเครดิต | ไฟล์ |
 | --- | --- | --- | --- | --- |
 | โมเดลตาชั่ง หอคอย จาน คริสตัล วงแหวน และวัตถุคณิตศาสตร์ | Balance Quest | สร้างสำหรับโครงการนี้ | Asset ต้นฉบับ ไม่มีเครดิตบุคคลภายนอก | `src/scene/`, `src/styles/app.css` |
-| เสียงสังเคราะห์ เอฟเฟกต์ และดนตรีพื้นหลัง | Balance Quest | สร้างสำหรับโครงการนี้ | Asset ต้นฉบับ ไม่มีเครดิตบุคคลภายนอก | `src/features/audio/audio.ts` |
+| เสียงสังเคราะห์ เอฟเฟกต์ และดนตรีพื้นหลัง | Balance Quest | ทำนองและเครื่องดนตรีสังเคราะห์สำหรับโครงการนี้ | Asset ต้นฉบับ ไม่มีเครดิตบุคคลภายนอก | `src/features/audio/audio.ts`, `src/features/audio/soundtrack.ts` |
 | Hand Landmarker float16/1 | Google MediaPipe | [ไฟล์จาก Google](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task) · [รุ่นโมเดล SHA-256 และสัญญาอนุญาต](https://huggingface.co/litert-community/MediaPipe-HandLandmarker-Full) | Apache-2.0 รักษาประกาศสัญญาอนุญาต ไฟล์โมเดลไม่ได้แก้ไข | `public/mediapipe/hand_landmarker.task`, `public/licenses/MediaPipe.txt` |
 | Tasks Vision JavaScript และ WASM 0.10.32 | Google MediaPipe | [โครงการ MediaPipe](https://github.com/google-ai-edge/mediapipe) | Apache-2.0 รักษาประกาศสัญญาอนุญาต | `public/mediapipe/wasm/`, `public/mediapipe/vision-worker-bundle.js`, `public/licenses/MediaPipe.txt` |
 | Noto Sans Thai | Noto Project Authors | [Noto Thai](https://github.com/notofonts/thai) · [Fontsource](https://fontsource.org/fonts/noto-sans-thai) | SIL OFL 1.1 รักษาข้อความลิขสิทธิ์และสัญญาอนุญาต | `dist/assets/noto-sans-thai-*`, `public/licenses/npm/NotoSansThai.txt` |

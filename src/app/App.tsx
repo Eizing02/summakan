@@ -1,26 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, Camera, CircleHelp, Compass, GraduationCap, Maximize, Minimize, Mouse, Scale, Settings, Shuffle, Sword } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, Camera, CircleHelp, Compass, GraduationCap, Maximize, Minimize, Mouse, Scale, Settings, Shuffle, Sword, Timer } from 'lucide-react';
 import { Dialog } from '../components/Dialog';
 import { MathText, originalTex } from '../components/MathText';
 import { equationText } from '../core/mathematics/linear-expression';
-import type { GestureFrame } from '../core/input/gesture-machine';
+import type { GameHandInput } from '../core/input/gesture-machine';
 import { CameraPanel, type CameraControl } from '../features/camera/CameraPanel';
 import { GameScreen } from '../features/game/GameScreen';
+import { RaceSetup, TimedRace, type TimedRound } from '../features/game/TimedRace';
 import { challenges, type Challenge, type Mode } from '../features/game/modes';
-import { firstLesson, levels, questionBank, randomQuestion, tutorialQuestion, type Question } from '../features/questions/questions';
+import { firstLesson, levels, questionBank, questionsForLevel, randomQuestion, shuffledQuestions, tutorialQuestion, type Question } from '../features/questions/questions';
 import { SettingsPanel } from '../features/settings/SettingsPanel';
 import { defaultLesson, initialPreferences, readLocal, writeLocal, type LessonOptions } from '../features/settings/settings';
-import { setAudio, sound, unlockAudio } from '../features/audio/audio';
+import { setAudio, setMusicScene, sound, unlockAudio } from '../features/audio/audio';
 import { TeacherScreen } from '../features/teacher/TeacherScreen';
 import BalanceScene from '../scene/BalanceScene';
 
-type Screen = 'MAIN_MENU' | 'MISSIONS' | 'TEACHER' | 'PLAYING';
+type Screen = 'MAIN_MENU' | 'MISSIONS' | 'TEACHER' | 'PLAYING' | 'RACE_SETUP' | 'RACING';
 interface Journey { mode: Mode; questions: Question[]; index: number; key: number; level: number }
 const keyFor = (question: Question) => equationText(question.equation);
+const firstCameraKey = 'balance-quest-first-camera';
 
 export function App() {
   const [screen, setScreen] = useState<Screen>('MAIN_MENU');
   const [journey, setJourney] = useState<Journey | null>(null);
+  const [timedRound, setTimedRound] = useState<TimedRound | null>(null);
+  const [raceChoice, setRaceChoice] = useState({ level: 5, minutes: 5 });
   const [level, setLevel] = useState(1);
   const [mode, setMode] = useState<'practice' | 'challenge'>('practice');
   const [challenge, setChallenge] = useState<Challenge>('rounds');
@@ -29,12 +33,15 @@ export function App() {
   const [preferences, setPreferences] = useState(initialPreferences);
   const [lesson, setLesson] = useState<LessonOptions>(() => ({ ...defaultLesson, ...readLocal('balance-quest-lesson', {}) }));
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraRequired, setCameraRequired] = useState(false);
+  const [cameraConfirmed, setCameraConfirmed] = useState(() => readLocal<boolean>(firstCameraKey, false) === true);
   const [cameraRunning, setCameraRunning] = useState(false);
   const [cameraStatus, setCameraStatus] = useState('กล้องปิด');
   const [full, setFull] = useState(Boolean(document.fullscreenElement));
   const [notice, setNotice] = useState('');
   const controls = useRef<CameraControl>(null);
-  const frameHandler = useRef<((frame: GestureFrame) => boolean) | null>(null);
+  const frameHandler = useRef<GameHandInput | null>(null);
+  const pendingPlay = useRef<(() => void) | null>(null);
   const used = useRef(new Set<string>());
   const counter = useRef(0);
 
@@ -43,6 +50,9 @@ export function App() {
     setAudio(preferences, lesson.sound);
   }, [preferences, lesson.sound]);
   useEffect(() => { writeLocal('balance-quest-lesson', lesson); }, [lesson]);
+  useEffect(() => {
+    if (screen !== 'RACING') setMusicScene(screen === 'PLAYING' ? 'playing' : 'waiting');
+  }, [screen]);
   useEffect(() => {
     const toggle = () => setFull(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', toggle);
@@ -54,7 +64,33 @@ export function App() {
     setCameraRunning(running);
   }
   function stopCamera() { controls.current?.stop(); }
-  function home() { stopCamera(); setCameraOpen(false); setScreen('MAIN_MENU'); setJourney(null); setNotice(''); }
+  function dismissCamera() {
+    pendingPlay.current = null;
+    setCameraOpen(false);
+    setCameraRequired(false);
+  }
+  function confirmCamera() {
+    writeLocal(firstCameraKey, true);
+    setCameraConfirmed(true);
+  }
+  function useCamera() {
+    if (!cameraRunning) return;
+    const start = pendingPlay.current;
+    confirmCamera();
+    dismissCamera();
+    start?.();
+  }
+  function beginWithCamera(start: () => void) {
+    if (cameraConfirmed || cameraRunning) {
+      if (!cameraConfirmed) confirmCamera();
+      start();
+      return;
+    }
+    pendingPlay.current = start;
+    setCameraRequired(true);
+    openSetup();
+  }
+  function home() { stopCamera(); dismissCamera(); setScreen('MAIN_MENU'); setJourney(null); setTimedRound(null); setNotice(''); }
   function fullscreen() {
     try {
       const promise = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
@@ -63,12 +99,14 @@ export function App() {
   }
   function launch(nextMode: Mode, questions: Question[], nextLevel = questions[0]?.level ?? 1) {
     if (!questions.length) return;
-    used.current = new Set([keyFor(questions[0])]);
-    setRoute(null);
-    setOverlay(null);
-    setJourney({ mode: nextMode, questions, index: 0, level: nextLevel, key: ++counter.current });
-    setScreen('PLAYING');
-    sound('ui_click');
+    beginWithCamera(() => {
+      used.current = new Set([keyFor(questions[0])]);
+      setRoute(null);
+      setOverlay(null);
+      setJourney({ mode: nextMode, questions, index: 0, level: nextLevel, key: ++counter.current });
+      setScreen('PLAYING');
+      sound('ui_click');
+    });
   }
   function advance() {
     if (!journey) return;
@@ -87,12 +125,32 @@ export function App() {
     if (journey.questions[journey.index + 1]) setJourney({ ...journey, index: journey.index + 1, key: ++counter.current });
   }
   function showMissions(nextMode: typeof mode) { setMode(nextMode); setScreen('MISSIONS'); }
+  function configureRace() {
+    setTimedRound(null);
+    dismissCamera();
+    setScreen('RACE_SETUP');
+  }
+  function startRace(level: number, minutes: number) {
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) return;
+    beginWithCamera(() => {
+      const questions = shuffledQuestions(level);
+      if (!questions.length) return;
+      setRaceChoice({ level, minutes });
+      setTimedRound({ id: ++counter.current, questions, level, minutes, started: Date.now() });
+      dismissCamera();
+      setNotice('');
+      setScreen('RACING');
+    });
+  }
   function openSetup() { setOverlay(null); setCameraOpen(true); }
   const question = journey?.questions[journey.index];
+  const game = { preferences, options: lesson, cameraOpen, cameraRunning, cameraStatus, frameHandler,
+    openCamera: openSetup, stopCamera, goHome: home, fullscreen, full, challenge, previousRoute: route, saveRoute: setRoute };
 
-  return <div className={'app-shell screen-' + screen.toLowerCase()} data-reduced={preferences.reduced}>
+  return <div className={'app-shell screen-' + screen.toLowerCase()} data-reduced={preferences.reduced}
+    onPointerDown={() => unlockAudio(preferences, lesson.sound)} onKeyDown={() => unlockAudio(preferences, lesson.sound)}>
     <a className="skip-link" href="#app-content">ข้ามไปเนื้อหาหลัก</a>
-    {screen !== 'PLAYING' && <header className="topbar">
+    {screen !== 'PLAYING' && screen !== 'RACING' && <header className="topbar">
       <button type="button" className="brand" onClick={home} aria-label="Balance Quest เมนูหลัก"><span className="brand-emblem"><Scale size={23} strokeWidth={1.6}/></span><span>Balance <strong>Quest</strong></span></button>
       <nav aria-label="การตั้งค่าเกม">
         <button type="button" className="mini-button teacher-nav" aria-label="โหมดครู" onClick={() => { stopCamera(); setScreen('TEACHER'); }}><GraduationCap size={19}/><span>โหมดครู</span></button>
@@ -100,7 +158,7 @@ export function App() {
         <button type="button" className="icon-button" aria-label={full ? 'ออกจากเต็มหน้าจอ' : 'เต็มหน้าจอ'} title="เต็มหน้าจอ" onClick={fullscreen}>{full ? <Minimize size={19}/> : <Maximize size={19}/>}</button>
       </nav>
     </header>}
-    <div className="app-content" id="app-content" onPointerDown={() => unlockAudio(preferences, lesson.sound)} onKeyDown={() => unlockAudio(preferences, lesson.sound)}>
+    <div className="app-content" id="app-content">
       {screen === 'MAIN_MENU' && <main className="home-screen">
         <div className="hero">
           <div className="hero-scene"><BalanceScene target={0} mood="idle" reduced={preferences.reduced || cameraOpen || Boolean(overlay)} quality={preferences.quality}/></div>
@@ -114,6 +172,7 @@ export function App() {
               <div className="sub-actions">
                 <button className="secondary" onClick={() => showMissions('practice')}><Compass size={18}/> ฝึกแก้สมการ</button>
                 <button className="secondary" onClick={() => showMissions('challenge')}><Sword size={18}/> เลือกภารกิจ</button>
+                <button className="secondary" onClick={configureRace}><Timer size={18}/> แข่งจับเวลา</button>
               </div>
             </div>
           </div>
@@ -122,7 +181,7 @@ export function App() {
         <footer className="home-footer">
           <div><button type="button" className="mini-button" onClick={openSetup}><Camera size={18}/> {cameraRunning ? 'เปิดกล้องแล้ว' : 'ตั้งค่ากล้อง'}</button>
             <button type="button" className="mini-button" onClick={() => setOverlay('help')}><CircleHelp size={18}/> วิธีเล่น</button></div>
-          <p><Mouse size={17}/> {cameraRunning ? cameraStatus : 'เล่นด้วยเมาส์ได้ทันที'}</p>
+          <p><Mouse size={17}/> {cameraRunning ? cameraStatus : cameraConfirmed ? 'เล่นด้วยเมาส์ได้' : 'เปิดกล้องก่อนเล่นครั้งแรก'}</p>
         </footer>
       </main>}
       {screen === 'MISSIONS' && <main className="content-screen missions-screen">
@@ -142,28 +201,29 @@ export function App() {
             {mode === 'challenge' && lesson.challengeLimit && <label>เงื่อนไขภารกิจ<select value={challenge} onChange={e => setChallenge(e.target.value as Challenge)}>
               {Object.entries(challenges).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select></label>}
-            <div className="mission-bank">{questionBank.filter(item => item.level === level).map(item => <button key={item.id} type="button" className="bank-item" onClick={() => launch(mode, [item], level)}><MathText tex={originalTex(item.originalExpression)}/><ArrowRight size={17}/></button>)}</div>
+            <div className="mission-bank">{questionsForLevel(level).map(item => <button key={item.id} type="button" className="bank-item" onClick={() => launch(mode, [item], level)}><MathText tex={originalTex(item.originalExpression)}/><ArrowRight size={17}/></button>)}</div>
           </section>
         </div>
       </main>}
       {screen === 'TEACHER' && <TeacherScreen options={lesson} setOptions={setLesson} launch={items => launch('teacher', items)} home={home}/>}
-      {screen === 'PLAYING' && journey && question && <GameScreen key={journey.key} question={question} mode={journey.mode} preferences={preferences} options={lesson}
-        cameraOpen={cameraOpen} cameraRunning={cameraRunning} cameraStatus={cameraStatus} frameHandler={frameHandler}
-        openCamera={openSetup} stopCamera={stopCamera} goHome={home} next={advance}
-        retry={() => setJourney({ ...journey, key: ++counter.current })} fullscreen={fullscreen} full={full} challenge={challenge}
-        hasNext={journey.mode === 'tutorial' || journey.mode === 'practice' || journey.mode === 'challenge' || journey.index + 1 < journey.questions.length}
-        previousRoute={route} saveRoute={setRoute}/>}
+      {screen === 'PLAYING' && journey && question && <GameScreen {...game} key={journey.key} question={question} mode={journey.mode}
+        next={advance} retry={() => setJourney({ ...journey, key: ++counter.current })}
+        hasNext={journey.mode === 'tutorial' || ((journey.mode === 'practice' || journey.mode === 'challenge')
+          ? used.current.size < questionsForLevel(journey.level).length : journey.index + 1 < journey.questions.length)}/>}
+      {screen === 'RACE_SETUP' && <RaceSetup {...raceChoice} home={home} start={startRace}/>}
+      {screen === 'RACING' && timedRound && <TimedRace key={timedRound.id} round={timedRound} game={game}
+        restart={() => startRace(timedRound.level, timedRound.minutes)} configure={configureRace} onFinish={() => setCameraOpen(false)}/>}
     </div>
     {overlay === 'settings' && <SettingsPanel value={preferences} onChange={setPreferences} close={() => setOverlay(null)} camera={openSetup}/>}
     {overlay === 'help' && <Dialog title="วิธีเล่น" onClose={() => setOverlay(null)}>
       <ol className="instructions"><li>ใช้เมาส์หรือกล้อง ชี้และหนีบนิ้วเพื่อหยิบวัตถุ</li>
         <li>หยิบเครื่องหมายไปวางบนจาน แล้วตามด้วยตัวเลขหนึ่งหลัก</li><li>เติมคำสั่งให้อีกฝั่ง ผลสะสมที่สมมูลกันจะจัดรูปโดยอัตโนมัติ</li>
-        <li>เมื่อแยก x ได้แล้ว ให้แทนค่าตรวจสมการเดิม</li></ol>
+        <li>เมื่อแยก x ได้ เกมจะแทนค่าตรวจสมการเดิม แล้วแสดงคำตอบ</li></ol>
       <div className="button-row"><button type="button" className="primary" onClick={() => launch('tutorial', [tutorialQuestion])}><BookOpen size={18}/> เริ่มบทสอน</button>
-        <button type="button" className="secondary" onClick={() => { stopCamera(); launch('tutorial', [tutorialQuestion]); }}><Mouse size={17}/> เล่นด้วยเมาส์</button></div>
+        {cameraConfirmed && <button type="button" className="secondary" onClick={() => { stopCamera(); launch('tutorial', [tutorialQuestion]); }}><Mouse size={17}/> เล่นด้วยเมาส์</button>}</div>
     </Dialog>}
-    <CameraPanel open={cameraOpen} control={controls} preferences={preferences} onCalibration={calibration => setPreferences({ ...preferences, calibration })}
-      onClose={() => setCameraOpen(false)} onStatus={cameraState} gameFrame={frameHandler}/>
+    <CameraPanel open={cameraOpen} required={cameraRequired} control={controls} preferences={preferences} onCalibration={calibration => setPreferences({ ...preferences, calibration })}
+      onClose={dismissCamera} onUse={useCamera} onStatus={cameraState} gameFrame={frameHandler}/>
     {notice && <div className="app-notice" role="status"><span>{notice}</span><button className="plain" type="button" onClick={() => setNotice('')}>ปิด</button></div>}
   </div>;
 }

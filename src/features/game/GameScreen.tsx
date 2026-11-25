@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, Camera, Check, CircleHelp, Download, Gem, History, Lightbulb, Maximize, Minimize, Mouse, Pause, Play, Plus, Printer, RotateCcw, Scale, Sparkles, Undo2, X } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from 'react';
+import { ArrowLeft, ArrowRight, BookOpen, Camera, CircleHelp, Download, Gem, History, Lightbulb, Maximize, Minimize, Mouse, Pause, Play, Plus, Printer, RotateCcw, Scale, Sparkles, Timer, Undo2, X } from 'lucide-react';
 import { assessBalance, angleForDifference } from '../../core/balance/balance-engine';
 import { scheduleSimplification } from '../../core/balance/simplification-controller';
 import { operators, visualExpression } from '../../core/mathematics/affine-transform';
 import { isolatedValue } from '../../core/mathematics/equation-engine';
 import { equationText, expressionText, type Side } from '../../core/mathematics/linear-expression';
-import type { GestureFrame } from '../../core/input/gesture-machine';
+import type { GameHandInput } from '../../core/input/gesture-machine';
 import { Dialog } from '../../components/Dialog';
 import { MathText, originalTex } from '../../components/MathText';
 import { TileFace, tileName } from '../../components/Tiles';
@@ -16,12 +16,21 @@ import { sound } from '../audio/audio';
 import { hintFor, levels, type Question } from '../questions/questions';
 import type { LessonOptions, Preferences } from '../settings/settings';
 import { challenges, modeNames, type Challenge, type Mode } from './modes';
-import { activeMilliseconds, canEdit, digits, gameReducer, newSession, type HistoryEntry, type Session, type Tile } from './session';
+import { activeMilliseconds, canEdit, digits, gameReducer, newSession, type GameAction, type HistoryEntry, type Session, type Tile } from './session';
 import { canPlaceTile, useDrag, type ObjectSource } from './useDrag';
 import { HandCursor } from './HandCursor';
 import { expressionParts } from './expression-parts';
 
-interface Props {
+export interface RacePlay {
+  deadline: number;
+  remaining: number;
+  score: number;
+  expired: boolean;
+  expire: () => void;
+  scored: (solvedAt: number) => void;
+}
+
+export interface GameProps {
   question: Question;
   mode: Mode;
   preferences: Preferences;
@@ -29,7 +38,7 @@ interface Props {
   cameraOpen: boolean;
   cameraRunning: boolean;
   cameraStatus: string;
-  frameHandler: RefObject<((frame: GestureFrame) => boolean) | null>;
+  frameHandler: RefObject<GameHandInput | null>;
   openCamera: () => void;
   stopCamera: () => void;
   goHome: () => void;
@@ -41,6 +50,7 @@ interface Props {
   challenge: Challenge;
   previousRoute: string | null;
   saveRoute: (route: string) => void;
+  race?: RacePlay;
 }
 
 const sides = ['left', 'right'] as const;
@@ -98,21 +108,26 @@ function MathExpression({ state, side }: { state: Session; side: Side }) {
     className={'math-part' + (cancellation ? ' cancel-' + cancellation : additive ? ' combinable' : '')}/>)}</>;
 }
 
-export function GameScreen(props: Props) {
-  const { question, mode, options, preferences, cameraOpen, cameraRunning, frameHandler } = props;
-  const [state, dispatch] = useReducer(gameReducer, question, item => newSession(item.equation, item.originalExpression));
+export function GameScreen(props: GameProps) {
+  const { question, mode, options, preferences, cameraOpen, cameraRunning, frameHandler, race } = props;
+  const [state, reduce] = useReducer(gameReducer, question, item => newSession(item.equation, item.originalExpression));
   const [panel, setPanel] = useState<Panel | null>(null);
   const [prediction, setPrediction] = useState('');
   const [explanation, setExplanation] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [verificationOpen, setVerificationOpen] = useState(true);
+  const [showResult, setShowResult] = useState(false);
   const [clock, setClock] = useState(Date.now());
   const stage = useRef<HTMLElement>(null);
   const leftAnchor = useRef<HTMLDivElement>(null);
   const rightAnchor = useRef<HTMLDivElement>(null);
   const anchors = useMemo(() => ({ left: leftAnchor, right: rightAnchor }), []);
-  const verifyInput = useRef<HTMLInputElement>(null);
-  const enabled = !panel && !cameraOpen && canEdit(state);
+  const nextQuestion = useRef(props.next);
+  nextQuestion.current = props.next;
+  function dispatch(action: GameAction) {
+    const now = Date.now();
+    if (race && (race.expired || now >= race.deadline)) { race.expire(); return; }
+    reduce({ ...action, now });
+  }
+  const enabled = !panel && !cameraOpen && !race?.expired && canEdit(state);
   const drag = useDrag(state, dispatch, enabled, stage);
   const balance = useMemo(() => assessBalance(state.base, state.pending), [state.base, state.pending]);
   const target = angleForDifference(balance.difference.toNumber(), preferences.tilt);
@@ -123,14 +138,29 @@ export function GameScreen(props: Props) {
   const record = state.phase === 'RESULT' ? assessmentFor(state, modeNames[mode], prediction, explanation) : null;
 
   useEffect(() => {
-    frameHandler.current = drag.handFrame;
+    frameHandler.current = { handleFrame: drag.handFrame, canGrab: drag.canHandGrab };
     return () => { frameHandler.current = null; };
   });
 
   useEffect(() => {
-    if (panel || cameraOpen) return;
+    if (panel || cameraOpen || race?.expired) return;
     return scheduleSimplification(state, preferences.settle, preferences.reduced, dispatch);
-  }, [state.revision, state.phase, state.animation, preferences.settle, preferences.reduced, panel, cameraOpen]);
+  }, [state.revision, state.phase, state.animation, preferences.settle, preferences.reduced, panel, cameraOpen, race?.expired]);
+
+  useLayoutEffect(() => {
+    if (race?.expired) reduce({ type: 'deadline', deadline: race.deadline });
+  }, [race?.expired, race?.deadline]);
+
+  useLayoutEffect(() => {
+    if (race && state.solvedAt !== null) race.scored(state.solvedAt);
+  }, [state.solvedAt]);
+
+  const racing = Boolean(race);
+  useEffect(() => {
+    if (!racing || race?.expired || state.phase !== 'RESULT') return;
+    const timer = window.setTimeout(() => nextQuestion.current(), 950);
+    return () => clearTimeout(timer);
+  }, [racing, race?.expired, state.phase]);
 
   useEffect(() => {
     if (!options.elapsed && !(mode === 'challenge' && options.challengeLimit && options.challengeTimer)) return;
@@ -139,15 +169,12 @@ export function GameScreen(props: Props) {
   }, [options.elapsed, mode, options.challengeLimit, options.challengeTimer]);
 
   useEffect(() => {
-    if (state.phase === 'SOLVED') setVerificationOpen(true);
     if (state.phase === 'RESULT') {
       sound('quest_complete');
-      window.setTimeout(() => sound('victory'), preferences.reduced ? 0 : 280);
+      const timer = window.setTimeout(() => sound('victory'), preferences.reduced ? 0 : 280);
+      return () => clearTimeout(timer);
     }
   }, [state.phase]);
-  useEffect(() => {
-    if (verificationOpen && state.phase === 'SOLVED') verifyInput.current?.focus();
-  }, [verificationOpen, state.phase]);
 
   useEffect(() => {
     if (record) void saveAssessment(record);
@@ -173,8 +200,7 @@ export function GameScreen(props: Props) {
     : !balance.visual ? 'ยังไม่สมดุล · ฝั่ง' + (balance.difference.numerator > 0n ? 'ซ้าย' : 'ขวา') + 'ต่ำกว่า'
     : 'ตาชั่งอยู่ในสมดุล';
 
-  const tutorial = state.phase === 'SOLVED' ? 'แทนค่าที่พบลงในสมการเดิมเพื่อตรวจสอบ' :
-    state.drafts.left || state.drafts.right ? 'หยิบตัวเลขไปวางต่อท้ายเครื่องหมายบนจาน'
+  const tutorial = state.drafts.left || state.drafts.right ? 'หยิบตัวเลขไปวางต่อท้ายเครื่องหมายบนจาน'
     : state.pending.left.length || state.pending.right.length ? 'สังเกตตาชั่ง แล้วเติมคำสั่งให้อีกฝั่งมีผลสะสมเท่ากัน'
     : 'เลื่อนเคอร์เซอร์ไปที่เครื่องหมาย แล้วหนีบนิ้วหรือคลิกเพื่อหยิบ';
   const snap = (side: Side, element: HTMLButtonElement) => {
@@ -203,7 +229,7 @@ export function GameScreen(props: Props) {
     {cameraRunning && <button type="button" className="icon-button" aria-label="ปิดกล้อง" title="ปิดกล้อง" onClick={props.stopCamera}><X size={19}/></button>}
   </>;
 
-  if (record && solved) {
+  if (record && solved && showResult && !race) {
     const criterion = mode === 'challenge' ? challengeResult(props.challenge, state, options, props.previousRoute) : null;
     return <main className="result-screen content-screen">
       <div className="result-head">
@@ -239,7 +265,7 @@ export function GameScreen(props: Props) {
     </main>;
   }
 
-  const lock = state.phase === 'PAUSED' || state.phase === 'SIMPLIFYING';
+  const lock = state.phase === 'PAUSED' || state.phase === 'SIMPLIFYING' || state.phase === 'RESULT' || race?.expired;
   const dropTile = drag.selection && !drag.selection.side ? drag.selection.tile : null;
   return <main className="gameplay" ref={stage} data-phase={state.phase}>
     <div className="game-hud">
@@ -248,14 +274,14 @@ export function GameScreen(props: Props) {
       <div className="hud-actions">
         {cameraControls}
         <button type="button" className="icon-button" aria-label={props.full ? 'ออกจากเต็มหน้าจอ' : 'เต็มหน้าจอ'} title="เต็มหน้าจอ" onClick={props.fullscreen}>{props.full ? <Minimize size={19}/> : <Maximize size={19}/>}</button>
-        <button type="button" className="icon-button" aria-label="หยุดชั่วคราว" title="หยุดชั่วคราว" disabled={lock || state.phase === 'SOLVED'} onClick={() => dispatch({ type: 'pause', now: Date.now() })}><Pause size={20}/></button>
+        {!race && <button type="button" className="icon-button" aria-label="หยุดชั่วคราว" title="หยุดชั่วคราว" disabled={lock || state.phase === 'SOLVED'} onClick={() => dispatch({ type: 'pause', now: Date.now() })}><Pause size={20}/></button>}
       </div>
     </div>
 
     <div className="lab">
       <BalanceScene target={target} mood={mood} anchors={anchors}
         panTiles={{ left: tilesOnPan(state, 'left'), right: tilesOnPan(state, 'right') }}
-        quality={preferences.quality} reduced={preferences.reduced || cameraOpen || Boolean(panel) || state.phase === 'PAUSED'}/>
+        quality={preferences.quality} reduced={preferences.reduced || cameraOpen || Boolean(panel) || state.phase === 'PAUSED' || race?.expired === true}/>
       {enabled && dropTile && <div className="drop-regions" aria-hidden="true">
         {sides.map(side => {
           const valid = canPlaceTile(state, side, dropTile);
@@ -277,11 +303,14 @@ export function GameScreen(props: Props) {
           <button className="mini-button help-button" type="button" aria-label="วิธีหยิบวัตถุ" title="วิธีหยิบวัตถุ" onClick={() => setPanel('controls')}><CircleHelp size={17}/></button>
         </div>
         <div className="lab-left">
-          {options.poe && <div className="stage-tools poe-actions">
+          {race ? <div className="race-hud">
+            <span className="timer race-clock" role="timer" aria-label="เวลาที่เหลือ" data-low={race.remaining <= 15}><Timer size={16}/>{readableSeconds(race.remaining).padStart(5, '0')}</span>
+            <span className="race-points" aria-label="คะแนน" data-testid="race-score">{race.score} คะแนน</span>
+          </div> : options.poe && <div className="stage-tools poe-actions">
             <button className="mini-button" type="button" onClick={() => setPanel('predict')}><BookOpen size={17}/><span>คาดการณ์</span></button>
             {state.history.length > 0 && <button className="mini-button" type="button" onClick={() => setPanel('explain')}><BookOpen size={17}/><span>อธิบาย</span></button>}
           </div>}
-          {(options.elapsed || (mode === 'challenge' && options.challengeLimit && options.challengeTimer > 0)) && <span className="timer">{readableSeconds(Math.floor(activeMilliseconds(state, clock) / 1000))}</span>}
+          {!race && (options.elapsed || (mode === 'challenge' && options.challengeLimit && options.challengeTimer > 0)) && <span className="timer">{readableSeconds(Math.floor(activeMilliseconds(state, clock) / 1000))}</span>}
         </div>
       </div>
       {sides.map(side => {
@@ -316,32 +345,32 @@ export function GameScreen(props: Props) {
         <p className="inventory-instruction" aria-live="polite">{drag.selection ? drag.selection.side ? 'ลากลงคลังหรือกดคืนเข้าคลังเพื่อนำคำสั่งออก' : 'ปล่อยวัตถุในฝั่งที่ต้องการ' : state.message || (
           mode === 'tutorial' ? tutorial : 'หยิบเครื่องหมายไปที่จาน จากนั้นวางตัวเลข')}</p>
         {drag.selection && <button type="button" className="mini-button" onClick={() => drag.finish({ inventory: true })}><X size={16}/> {drag.selection.side ? 'คืนเข้าคลัง' : 'ยกเลิกการหยิบ'}</button>}
-        {state.phase === 'SOLVED' && !verificationOpen && <button className="mini-button" type="button" onClick={() => setVerificationOpen(true)}><Check size={17}/> แทนค่าตรวจคำตอบ</button>}
       </div>
-      <div className="tile-group operators" aria-label="เครื่องหมาย">{operators.map(buttonFor)}</div>
       <div className="tile-group digits" aria-label="ตัวเลข">{digits.map(buttonFor)}</div>
+      <div className="tile-group operators" aria-label="เครื่องหมาย">{operators.map(buttonFor)}</div>
     </div>
 
     <HandCursor display={drag.cursor} reduced={preferences.reduced}/>
     {drag.drawing && <div className={'drag-ghost' + (drag.drawing.returning ? ' is-returning' : '')} ref={drag.ghost} aria-hidden="true"><TileFace tile={drag.drawing.tile}/></div>}
 
-    {state.phase === 'SOLVED' && verificationOpen && <Dialog title="แทนค่าตรวจคำตอบ" onClose={() => setVerificationOpen(false)}>
-      <div className="verification"><MathText tex={originalTex(question.originalExpression)} className="verification-equation"/>
-        <p>พิมพ์ค่า x ที่ได้จากสมการ <MathText tex={equationText(state.base, true)}/> แล้วตรวจผลสองฝั่ง</p>
-        <form onSubmit={event => { event.preventDefault(); dispatch({ type: 'verify', value: answer, now: Date.now() }); }}>
-          <label>ค่า x <input ref={verifyInput} value={answer} onChange={event => setAnswer(event.target.value)} required maxLength={160} placeholder="เช่น −5 หรือ 2/3"/></label>
-          {state.message && <p className={state.verification?.valid === false ? 'error-text' : 'muted'} role="status">{state.message}</p>}
-          {state.verification && !state.verification.valid && <MathText tex={state.verification.left.toTex() + '\\ne ' + state.verification.right.toTex()}/>}
-          <button className="primary" type="submit"><Check size={19}/> ตรวจคำตอบ</button>
-        </form>
-        {state.undo.length > 0 && <button type="button" className="plain" onClick={() => dispatch({ type: 'undo' })}><Undo2 size={17}/> กลับไปแก้สมการ</button>}
-      </div>
-    </Dialog>}
+    {record && solved && (race
+      ? !race.expired && <div className="race-correct" role="status"><Sparkles size={20}/> ถูกต้อง! <MathText tex={'x = ' + solved.toTex()}/></div>
+      : !cameraOpen && <Dialog title="ถูกต้อง!" className="answer-dialog" onClose={() => setShowResult(true)}>
+        <div className="answer-content">
+          <Gem className="answer-emblem" size={28} aria-hidden="true"/>
+          <MathText className="answer-value" tex={'x = ' + solved.toTex()}/>
+          <p>แทนค่าในสมการเดิมแล้ว ทั้งสองฝั่งเท่ากัน</p>
+          <div className="button-row">
+            {props.hasNext && <button className="primary" autoFocus onClick={props.next}>ข้อต่อไป <ArrowRight size={18}/></button>}
+            <button className={props.hasNext ? 'secondary' : 'primary'} onClick={() => setShowResult(true)}><History size={17}/> ดูผลและวิธีทำ</button>
+          </div>
+        </div>
+      </Dialog>)}
     {state.phase === 'PAUSED' && <Dialog title="หยุดชั่วคราว" onClose={() => dispatch({ type: 'resume', now: Date.now() })}>
       <div className="button-row"><button className="primary" onClick={() => dispatch({ type: 'resume', now: Date.now() })}><Play size={17}/> เล่นต่อ</button>
         <button className="secondary" onClick={props.goHome}><ArrowLeft size={17}/> เมนูหลัก</button></div>
     </Dialog>}
-    {panel && <Dialog title={{ history: 'ประวัติการจัดรูป', hint: 'คำใบ้', predict: 'คาดการณ์ก่อนลงมือ', explain: 'อธิบายสิ่งที่สังเกต', controls: 'วิธีหยิบวัตถุ' }[panel]}
+    {panel && !race?.expired && <Dialog title={{ history: 'ประวัติการจัดรูป', hint: 'คำใบ้', predict: 'คาดการณ์ก่อนลงมือ', explain: 'อธิบายสิ่งที่สังเกต', controls: 'วิธีหยิบวัตถุ' }[panel]}
       onClose={() => setPanel(null)}>
       {panel === 'history' && <HistoryList entries={state.history}/>}
       {panel === 'hint' && <p>{hintFor(state.base, state.pending.left, state.pending.right)}</p>}
