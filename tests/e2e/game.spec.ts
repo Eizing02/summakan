@@ -237,12 +237,24 @@ test.describe('responsive inventories on touch screens', () => {
 
     for (const viewport of [
       { width: 320, height: 568 }, { width: 768, height: 1024 },
-      { width: 568, height: 320 }, { width: 667, height: 375 }, { width: 1040, height: 440 }, { width: 1366, height: 768 },
+      { width: 568, height: 320 }, { width: 667, height: 375 }, { width: 1040, height: 440 },
+      { width: 1366, height: 768 }, { width: 1920, height: 1080 },
     ]) {
       await page.setViewportSize(viewport);
-      const scale = (await page.locator('.lab').boundingBox())!;
-      const numberRail = (await page.locator('.number-rail').boundingBox())!;
-      const operatorRail = (await page.locator('.operator-rail').boundingBox())!;
+      await page.waitForFunction(({ width, height }) => innerWidth === width && innerHeight === height, viewport);
+      const { scale, numberRail, operatorRail, operatorTiles, inventory } = await page.evaluate(() => {
+        const rect = (element: Element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return { x, y, width, height };
+        };
+        return {
+          scale: rect(document.querySelector('.lab')!),
+          numberRail: rect(document.querySelector('.number-rail')!),
+          operatorRail: rect(document.querySelector('.operator-rail')!),
+          operatorTiles: Array.from(document.querySelectorAll('.operators .inventory-tile'), rect),
+          inventory: Array.from(document.querySelectorAll('.inventory-tile'), rect),
+        };
+      });
       if (viewport.height > viewport.width) {
         expect(scale.width).toBeCloseTo(viewport.width, 0);
         expect(numberRail.y).toBeGreaterThanOrEqual(scale.y + scale.height - 1);
@@ -252,15 +264,17 @@ test.describe('responsive inventories on touch screens', () => {
         expect(operatorRail.x + operatorRail.width).toBeCloseTo(viewport.width, 0);
         expect(numberRail.x + numberRail.width).toBeCloseTo(scale.x, 0);
         expect(operatorRail.x).toBeCloseTo(scale.x + scale.width, 0);
-        const opFirst = (await page.locator('.operators .inventory-tile').first().boundingBox())!;
-        const opLast = (await page.locator('.operators .inventory-tile').last().boundingBox())!;
+        const opFirst = operatorTiles[0];
+        const opLast = operatorTiles[operatorTiles.length - 1];
         expect(opFirst.x).toBeCloseTo(opLast.x, 0);
         expect(opLast.y).toBeGreaterThan(opFirst.y);
       }
-      const inventory = page.locator('.inventory-tile');
-      for (const item of await inventory.all()) {
-        await expect(item).toBeInViewport({ ratio: 1 });
-        const box = (await item.boundingBox())!;
+      expect(inventory).toHaveLength(14);
+      for (const box of inventory) {
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+        expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
         expect(box.width).toBeGreaterThanOrEqual(44);
         expect(box.height).toBeGreaterThanOrEqual(44);
       }
